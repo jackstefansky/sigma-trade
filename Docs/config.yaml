@@ -1,0 +1,146 @@
+# ============================================================
+# StockPilot AI — Master Configuration
+# ============================================================
+
+# ----------------------------------------------------------
+# App metadata
+# ----------------------------------------------------------
+app:
+  name: "StockPilot AI"
+  version: "0.1.0"
+  environment: "development"       # development | staging | production
+  locale: "en"                     # default UI language (en | pl)
+  currency: "USD"                  # virtual portfolio currency
+
+# ----------------------------------------------------------
+# Data provider
+# ----------------------------------------------------------
+data_provider:
+  name: "finnhub"
+  # API key loaded from env: FINNHUB_API_KEY
+  base_url: "https://finnhub.io/api/v1"
+  rate_limit:
+    requests_per_minute: 60        # free tier
+  endpoints:
+    company_news: "/company-news"
+    market_news: "/news"
+    quote: "/quote"
+    earnings_calendar: "/calendar/earnings"
+    recommendation: "/recommendation"
+
+# ----------------------------------------------------------
+# AI provider (for agent analysis)
+# ----------------------------------------------------------
+ai_provider:
+  # Switch to "claude" when ready for production
+  provider: "gemini"               # gemini | claude
+
+  gemini:
+    # API key loaded from env: GEMINI_API_KEY
+    model: "gemini-2.0-flash"
+    max_tokens: 4096
+    temperature: 0.3
+
+  claude:
+    # API key loaded from env: ANTHROPIC_API_KEY
+    model: "claude-sonnet-4-20250514"
+    max_tokens: 4096
+    temperature: 0.3
+
+# ----------------------------------------------------------
+# Watchlist — tickers to track
+# ----------------------------------------------------------
+watchlist:
+  tickers:
+    - symbol: "AAPL"
+      name: "Apple Inc."
+      sector: "Technology"
+    - symbol: "MSFT"
+      name: "Microsoft Corp."
+      sector: "Technology"
+    - symbol: "GOOGL"
+      name: "Alphabet Inc."
+      sector: "Technology"
+    - symbol: "TSLA"
+      name: "Tesla Inc."
+      sector: "Automotive"
+    - symbol: "NVDA"
+      name: "NVIDIA Corp."
+      sector: "Technology"
+
+# ----------------------------------------------------------
+# Feature flags
+# ----------------------------------------------------------
+features:
+  # --- News Agent ---
+  news_agent:
+    enabled: true
+
+    # Auto-fetch interval (seconds). 0 = manual only.
+    fetch_interval_seconds: 300    # 300 = 5 min
+
+    # Enable/disable automatic periodic fetching
+    auto_fetch: true
+
+    # Max articles per batch sent to AI analysis
+    max_articles_per_batch: 15
+
+    # How long to keep articles in memory (hours)
+    retention_hours: 48
+
+    # Include general market news (not ticker-specific)
+    include_market_news: true
+
+    # Use AI for deeper analysis (impact scoring, interpretation)
+    # If false, feed shows raw Finnhub data without AI enrichment
+    ai_analysis: true
+
+    # Badge notifications
+    notifications: true
+
+    # Only badge-notify for articles above this impact score
+    notification_min_impact: 0.5   # 0.0 to 1.0
+
+    # Red badge threshold — critical alerts
+    critical_alert_threshold: 0.8  # 0.0 to 1.0
+
+  # --- Future agents (Phase 2) ---
+  technical_agent:
+    enabled: false
+  sentiment_agent:
+    enabled: false
+  orchestrator_agent:
+    enabled: false
+  coach_agent:
+    enabled: false
+  strategy_agent:
+    enabled: false
+
+  # --- Onboarding ---
+  onboarding:
+    enabled: true
+    knowledge_quiz: true
+    strategy_setup: true
+    guided_first_trade: true
+
+  # --- UI ---
+  ui:
+    dark_mode: true
+    agent_workspace_position: "right"
+    show_debug_panel: true         # dev only
+
+# ----------------------------------------------------------
+# Development settings
+# ----------------------------------------------------------
+dev:
+  # Serve saved JSON fixtures instead of real API calls
+  use_mock_data: false
+
+  # Log all API requests/responses
+  verbose_logging: true
+
+  # Artificial latency (ms)
+  artificial_delay_ms: 0
+
+  # Safety net — max API calls per session
+  max_api_calls_per_session: 100
