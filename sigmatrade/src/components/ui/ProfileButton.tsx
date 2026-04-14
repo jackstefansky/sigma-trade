@@ -54,7 +54,7 @@ export default function ProfileButton() {
           style={{ borderRadius: "25px" }}
         >
           <DropdownItem
-            label="My prodile"
+            label="My Profile"
             onClick={() => {
               console.log("My Profile");
               setOpen(false);
