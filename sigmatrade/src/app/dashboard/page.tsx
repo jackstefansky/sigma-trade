@@ -2,6 +2,7 @@ import { loadConfig } from '@/lib/config';
 import AgentSidebar, { type AgentId, type AgentMeta } from '@/components/agents/AgentSidebar';
 import NewsFeed from '@/components/agents/NewsFeed';
 import MarketView from '@/components/market/MarketView';
+import ProfileButton from '@/components/ui/ProfileButton';
 
 export default async function DashboardPage() {
   const config = loadConfig();
@@ -50,18 +51,19 @@ export default async function DashboardPage() {
     <div className="flex flex-col h-screen bg-bg-base overflow-hidden">
       {/* TopBar */}
       <header className="h-12 flex items-center justify-between px-4 border-b border-border-subtle shrink-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <span className="font-mono text-sm font-semibold text-gray-100 tracking-wide">
             StockPilot AI
           </span>
           <span className="font-mono text-xs text-gray-600">v0.1.0</span>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+            <span className="font-mono text-xs text-gray-500 uppercase tracking-wider">
+              Paper Trading
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
-          <span className="font-mono text-xs text-gray-500 uppercase tracking-wider">
-            Paper Trading
-          </span>
-        </div>
+        <ProfileButton />
       </header>
 
       {/* Main 2-panel layout */}
