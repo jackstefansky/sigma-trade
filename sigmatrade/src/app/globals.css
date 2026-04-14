@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0a0a0a;
+  --foreground: #e5e5e5;
+}
+
+html,
+body {
+  background-color: #0a0a0a;
+  color: #e5e5e5;
+  height: 100%;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #111111;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1f1f1f;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a2a;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1f1f1f #111111;
+}
+
+/* ----------------------------------------------------------------
+   AI Analysis Block — animated conic-gradient border
+   ---------------------------------------------------------------- */
+
+.ai-analysis-block {
+  position: relative;
+  padding: 1px;
+  border-radius: 8px;
+  background: linear-gradient(
+    135deg,
+    rgba(0, 255, 136, 0.5) 0%,
+    rgba(0, 255, 136, 0.15) 25%,
+    rgba(0, 255, 136, 0.5) 50%,
+    rgba(0, 255, 136, 0.15) 75%,
+    rgba(0, 255, 136, 0.5) 100%
+  );
+  background-size: 300% 300%;
+  animation: ai-border-shimmer 6s linear infinite;
+}
+
+.ai-analysis-block[data-in-view="false"] {
+  animation-play-state: paused;
+}
+
+.ai-analysis-inner {
+  background: #0a0d0b;
+  border-radius: 7px;
+  padding: 10px 12px;
+  color: #ffffff;
+}
+
+@keyframes ai-border-shimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-analysis-block {
+    animation: none;
+    background: linear-gradient(
+      135deg,
+      rgba(0, 255, 136, 0.4) 0%,
+      rgba(0, 255, 136, 0.2) 100%
+    );
+  }
+}
