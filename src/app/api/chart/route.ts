@@ -38,7 +38,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   ]);
 
   let usingMockData = false;
-  let candles =
+  const candles =
     candlesResult.status === 'fulfilled'
       ? candlesResult.value
       : (() => {
