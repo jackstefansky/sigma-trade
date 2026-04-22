@@ -1,141 +1,47 @@
-# News Agent — Architektura i źródła danych
+# News Agent — Architektura v3 (final)
 
-> Pierwszy agent do implementacji. Cel: dostarczać feed newsów finansowych
-> dla obserwowanych tickerów, z analizą wpływu na cenę, wyświetlany
-> jako interaktywny czat w workspace agentów.
+> Data source: Finnhub (free tier, 60 req/min)
+> AI analysis: Gemini (dev) → Claude (prod)
+> Config: `config.yaml`
+> No MCP. No Alpha Vantage.
 
 ---
 
-## 1. Zaktualizowany layout — workspace agentów
+## 1. Layout — workspace agentów
 
 ```
 ┌──────────────────────────┬──────────────────────────────┐
 │                          │  Agent Workspace             │
 │   Market View            │                              │
-│                          │  ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐   │
-│   • Chart (candlestick)  │  │📰│ │📊│ │💬│ │🎯│ │🎓│   │
-│   • Order book           │  └──┘ └──┘ └──┘ └──┘ └──┘   │
+│                          │   (○)  (○)  (○)  (○)  (○)   │
+│   • Chart (candlestick)  │   📰   📊   💬   🎯   🎓   │
+│   • Order book           │   ●3              ●1         │
 │   • Watchlist             │  News Tech  Sent Orch Coach  │
-│   • Position manager     │   ●3              ●1         │
-│   • Trade execution      │                              │
-│                          │  ┌────────────────────────┐  │
+│   • Position manager     │                              │
+│   • Trade execution      │  ┌────────────────────────┐  │
 │                          │  │  News Agent             │  │
 │                          │  │                        │  │
-│                          │  │  [news feed messages]  │  │
-│                          │  │  [interactive cards]   │  │
-│                          │  │  [impact alerts]       │  │
+│                          │  │  [feed / cards / alerts]│  │
 │                          │  │                        │  │
 │                          │  ├────────────────────────┤  │
-│                          │  │  [  ask news agent  ]  │  │
+│                          │  │  [ ask news agent... ] │  │
 │                          │  └────────────────────────┘  │
 └──────────────────────────┴──────────────────────────────┘
 
-Ikony agentów = okrągłe awatary z badge'em (liczba nieprzeczytanych).
-Aktywny agent = podświetlony ring.
-Klik na ikonę = przełączenie czatu (z zachowaniem scrolla).
+Ikony = okrągłe awatary (nie taby).
+Badge = kółko z liczbą nieprzeczytanych wiadomości.
+  - niebieski badge = standardowe wiadomości
+  - czerwony badge = critical alert (impact ≥ config threshold)
+Aktywny agent = podświetlony ring wokół ikony.
 ```
 
 ---
 
-## 2. Źródła danych — porównanie
+## 2. Finnhub — co dostajemy
 
-### Tier 1: Rekomendowane na start
+### Company News endpoint
+`GET /company-news?symbol=AAPL&from=2026-03-10&to=2026-03-11&token=KEY`
 
-| API | Free tier | News? | Sentiment? | Rate limit | Uwagi |
-|-----|-----------|-------|------------|------------|-------|
-| **Finnhub** | Tak | ✅ Company news + market news | ✅ News sentiment (premium) | 60 req/min | **Najlepszy stosunek danych/cena.** 1 rok historii newsów. Company news per ticker. WebSocket dla live data. SDK dla JS/Python. |
-| **Alpha Vantage** | Tak (klucz) | ✅ News + sentiment | ✅ Wbudowany sentiment scoring | 25 req/dzień (free) | Sentiment scores wbudowane w response. Ale 25 req/dzień to za mało na live app. |
-
-### Tier 2: Dobre uzupełnienie
-
-| API | Free tier | News? | Sentiment? | Rate limit | Uwagi |
-|-----|-----------|-------|------------|------------|-------|
-| **Marketaux** | Tak | ✅ 5000+ źródeł | ✅ Entity-level sentiment | 100 req/dzień (free) | NLP entity extraction — wykrywa które tickery są w artykule. Dobry jako secondary source. |
-| **FMP** | Tak | ✅ Stock news, press releases | ❌ | 250 req/dzień | Silne na fundamentals i SEC filings. News endpoint daje headline + snippet + ticker. |
-| **NewsData.io** | Tak | ✅ General + business | ✅ Sentiment analysis | 200 req/dzień | Szerszy zasięg (nie tylko finance). Filtry po kategorii, języku, kraju. |
-
-### Tier 3: Specjalistyczne / do późniejszych faz
-
-| API | Uwagi |
-|-----|-------|
-| **Polygon.io** | Najlepsze dane giełdowe (tick-by-tick), ale free tier: 5 req/min — za mało. News endpoint premium only. |
-| **Benzinga** | Pro-grade news z categorization, ale płatny. |
-| **EODHD** | Dobry sentiment + word weights per ticker, ale 5 API calls per request. |
-
-### Rekomendacja
-
-**Primary: Finnhub** — najhojniejszy free tier (60 req/min), dedykowany endpoint
-`/company-news` per ticker, JSON z headline + summary + source + image.
-Wystarczający na MVP i development.
-
-**Secondary (Faza 2): Marketaux** — entity-level sentiment scoring.
-Gdy Finnhub nie daje wystarczającego sentymentu, Marketaux go uzupełnia.
-
-**Sentiment via Claude** — zamiast polegać na API sentiment scores, News Agent
-używa Claude do analizy sentymentu artykułów. Daje lepszą kontrolę
-i jakość niż gotowe scores z API.
-
----
-
-## 3. Architektura News Agenta — krok po kroku
-
-### 3.1 Ogólny flow
-
-```
-                    ┌─────────────┐
-                    │  Watchlist   │  tickery które user obserwuje
-                    └──────┬──────┘
-                           │
-                           ▼
-                ┌─────────────────────┐
-                │  1. DATA FETCHER    │  Next.js API route
-                │     (server-side)   │  co 5 min (cron) lub on-demand
-                └──────────┬──────────┘
-                           │ raw articles JSON
-                           ▼
-                ┌─────────────────────┐
-                │  2. DEDUPLICATOR    │  filtruje duplikaty
-                │     + FILTER        │  i nierelevantne artykuły
-                └──────────┬──────────┘
-                           │ unique articles
-                           ▼
-                ┌─────────────────────┐
-                │  3. CLAUDE ANALYST  │  Claude API call
-                │     (News Agent)    │  analiza + sentiment + impact
-                └──────────┬──────────┘
-                           │ analyzed articles
-                           ▼
-                ┌─────────────────────┐
-                │  4. FORMATTER       │  formatuje na ChatBlocks
-                │     + PRIORITIZER   │  sortuje po impact/urgency
-                └──────────┬──────────┘
-                           │ ChatBlock[]
-                           ▼
-                ┌─────────────────────┐
-                │  5. CHAT FEED       │  wyświetla w workspace
-                │     + BADGE         │  aktualizuje badge count
-                └─────────────────────┘
-```
-
-### 3.2 Krok 1 — Data Fetcher
-
-**Co robi:** Pobiera surowe artykuły z Finnhub dla tickerów z watchlisty.
-
-**Kiedy się odpala:**
-- Automatycznie co 5 minut (server-side cron job / `setInterval` w dev)
-- Na żądanie, gdy user doda nowy ticker do watchlisty
-- Gdy user otworzy czat z News Agentem (fresh pull)
-
-**Endpoint:** `GET /api/news/fetch`
-
-**Logika:**
-1. Pobierz listę tickerów z watchlisty usera
-2. Dla każdego tickera → Finnhub `/company-news?symbol=X&from=YESTERDAY&to=TODAY`
-3. Dodatkowo → Finnhub `/news?category=general` dla macro newsów
-4. Zbierz wszystkie artykuły w jedną tablicę
-5. Zapisz do in-memory store (lub localStorage na start)
-
-**Finnhub response (per artykuł):**
 ```json
 {
   "category": "company",
@@ -150,254 +56,464 @@ i jakość niż gotowe scores z API.
 }
 ```
 
-**Rate limit management:**
-- Finnhub: 60 req/min
-- Przy 5 tickerach: 5 company-news + 1 general = 6 requestów per fetch
-- Przy 20 tickerach: 20 + 1 = 21 requestów — wciąż OK
-- Cache: nie rób ponownego fetcha jeśli ostatni był <5 min temu
+### General Market News
+`GET /news?category=general&token=KEY`
+
+Same format, broader scope (macro, sector-level news).
+
+### Co Finnhub NIE daje (i czym to uzupełniamy):
+- **Sentiment score** → AI analysis (Gemini/Claude) liczy impact + sentiment
+- **Ticker relevance score** → AI analysis ocenia relevance do portfela
+- **Topic categorization** → AI analysis klasyfikuje (earnings/macro/regulatory/etc.)
+
+### Rate limit math
+```
+5 tickerów × 1 request each   = 5 req
+1 general market news          = 1 req
+                               -------
+Total per fetch cycle          = 6 req
+
+Przy fetch co 5 min:
+  6 req × 12 cycles/h = 72 req/h  → limit 60/min, OK (72 << 3600)
+
+Przy 20 tickerów:
+  21 req per cycle × 12 = 252 req/h → wciąż OK
+
+Zapas jest ogromny. Bottleneck to AI cost, nie rate limit.
+```
 
 ---
 
-### 3.3 Krok 2 — Deduplicator + Filter
+## 3. Pipeline — krok po kroku
 
-**Co robi:** Czyści surowe dane zanim trafią do Claude.
-
-**Logika:**
-1. **Deduplikacja** — po `id` artykułu (Finnhub daje unikalne ID)
-2. **Deduplikacja cross-ticker** — ten sam artykuł może pojawić się
-   dla AAPL i MSFT jeśli dotyczy obu. Łączymy w jeden z tagami obu tickerów.
-3. **Filtr czasowy** — odrzuć artykuły starsze niż 48h (chyba że user
-   specjalnie pyta o starsze)
-4. **Filtr jakości** — odrzuć artykuły z pustym `summary` lub `headline`
-   krótszym niż 20 znaków (spam/glitch)
-5. **Limit batch** — max 15 artykułów per batch do Claude
-   (kontrola kosztów tokena)
-
-**Output:** Oczyszczona tablica artykułów gotowa do analizy.
+```
+┌─────────────────┐
+│   config.yaml   │
+│  • watchlist    │
+│  • feature flags│
+│  • intervals    │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│  1. SCHEDULER           │
+│                         │
+│  Reads:                 │
+│  - fetch_interval_sec   │
+│  - auto_fetch flag      │
+│                         │
+│  Triggers fetch every   │
+│  N seconds, or on       │
+│  manual request         │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│  2. FINNHUB FETCHER     │
+│                         │
+│  For each ticker:       │
+│    GET /company-news    │
+│                         │
+│  If include_market_news:│
+│    GET /news?general    │
+│                         │
+│  Collects raw articles  │
+└────────────┬────────────┘
+             │ RawArticle[]
+             ▼
+┌─────────────────────────┐
+│  3. DEDUP + FILTER      │
+│                         │
+│  • Dedup by article id  │
+│  • Merge cross-ticker   │
+│    duplicates           │
+│  • Drop older than      │
+│    retention_hours      │
+│  • Drop empty/spam      │
+│  • Cap at max_articles_ │
+│    per_batch            │
+└────────────┬────────────┘
+             │ clean RawArticle[]
+             ▼
+┌─────────────────────────┐
+│  4. AI ANALYST          │
+│                         │
+│  Checks config:         │
+│  ai_analysis: true?     │
+│                         │
+│  YES → send batch to    │
+│    Gemini (dev) or      │
+│    Claude (prod)        │
+│    with system prompt   │
+│                         │
+│  NO → pass through raw  │
+│    articles without     │
+│    enrichment           │
+│                         │
+│  Output per article:    │
+│  - impactScore (-1..+1) │
+│  - category             │
+│  - urgency              │
+│  - interpretation       │
+│  - affectsPortfolio     │
+│  - tags                 │
+└────────────┬────────────┘
+             │ AnalyzedArticle[]
+             ▼
+┌─────────────────────────┐
+│  5. FORMATTER           │
+│                         │
+│  Maps → ChatBlock[]     │
+│  Sorts by priority:     │
+│  1. critical alerts     │
+│  2. high + in portfolio │
+│  3. medium              │
+│  4. low (collapsed)     │
+│                         │
+│  Generates:             │
+│  - NewsCard blocks      │
+│  - AlertCard blocks     │
+│  - TrendInsight blocks  │
+└────────────┬────────────┘
+             │ ChatBlock[]
+             ▼
+┌─────────────────────────┐
+│  6. FEED + BADGE        │
+│                         │
+│  New blocks → update    │
+│  badge count on icon    │
+│                         │
+│  impact ≥ critical →    │
+│    red badge            │
+│  impact ≥ min_impact →  │
+│    blue badge           │
+│                         │
+│  User opens chat →      │
+│    badge resets to 0    │
+└─────────────────────────┘
+```
 
 ---
 
-### 3.4 Krok 3 — Claude Analyst (serce News Agenta)
+## 4. Krok 2 — Finnhub Fetcher (szczegóły)
 
-**Co robi:** Wysyła batch artykułów do Claude API z system promptem
-News Agenta. Claude analizuje, ocenia wpływ, daje sentiment score.
+```typescript
+// lib/news/finnhub-client.ts
 
-**API call (Next.js API route → Claude):**
+interface FinnhubArticle {
+  category: string;
+  datetime: number;          // UNIX timestamp
+  headline: string;
+  id: number;
+  image: string;
+  related: string;           // ticker symbol
+  source: string;
+  summary: string;
+  url: string;
+}
 
-System prompt (skrót — pełna wersja w `agents/NEWS_AGENT.md`):
-```
-Jesteś News Agent — ekspert od analizy finansowych newsów.
+async function fetchCompanyNews(
+  ticker: string,
+  from: string,              // YYYY-MM-DD
+  to: string
+): Promise<FinnhubArticle[]> {
+  const url = `${BASE_URL}/company-news?symbol=${ticker}&from=${from}&to=${to}&token=${API_KEY}`;
+  const res = await fetch(url);
+  if (res.status === 429) throw new RateLimitError();
+  return res.json();
+}
 
-Dostajesz batch artykułów i kontekst portfela użytkownika.
+async function fetchMarketNews(): Promise<FinnhubArticle[]> {
+  const url = `${BASE_URL}/news?category=general&token=${API_KEY}`;
+  const res = await fetch(url);
+  return res.json();
+}
 
-Dla każdego artykułu:
-1. Oceń IMPACT SCORE (-1.0 do +1.0) na cenę tickera
-2. Określ CATEGORIĘ (earnings, macro, sector, company, regulatory)
-3. Napisz INTERPRETACJĘ — 2-3 zdania co to znaczy dla inwestora
-4. Określ URGENCY (low, medium, high, critical)
-5. Jeśli artykuł dotyczy tickera w portfelu usera, zaznacz to
+async function fetchAllNews(tickers: string[]): Promise<RawArticle[]> {
+  const today = formatDate(new Date());
+  const yesterday = formatDate(subDays(new Date(), 1));
 
-Dodatkowo:
-- Jeśli widzisz pattern w wielu artykułach (np. cały sektor w dół),
-  wygeneruj SUMMARY INSIGHT
-- Jeśli jest artykuł CRITICAL (earnings miss, CEO resign, regulatory
-  action), oznacz go do natychmiastowej notyfikacji
+  // Parallel fetch per ticker
+  const tickerResults = await Promise.all(
+    tickers.map(t => fetchCompanyNews(t, yesterday, today))
+  );
 
-Odpowiedz w JSON.
-```
+  // Flatten + normalize to RawArticle format
+  const articles = tickerResults.flat().map(normalizeArticle);
 
-**Claude response (per artykuł):**
-```json
-{
-  "articleId": 123456,
-  "ticker": "AAPL",
-  "impactScore": 0.6,
-  "category": "company",
-  "urgency": "medium",
-  "interpretation": "Apple's new AI features could drive upgrade cycle...",
-  "affectsPortfolio": true,
-  "tags": ["AI", "product-launch", "bullish"]
+  // Optionally add market news
+  if (config.features.news_agent.include_market_news) {
+    const marketNews = await fetchMarketNews();
+    articles.push(...marketNews.map(normalizeArticle));
+  }
+
+  return articles;
 }
 ```
 
-**Kiedy wywoływać Claude:**
-- Nowy batch artykułów po fetch (co 5 min)
-- Gdy user zadaje pytanie w czacie News Agenta
-- NIE wywoływać jeśli batch jest identyczny jak poprzedni (cache)
+---
 
-**Optymalizacja kosztów:**
-- Batch artykuły w jednym callu (nie 1 call per artykuł)
-- Używaj `claude-sonnet-4-20250514` (tańszy, wystarczający na news analysis)
-- Cache wyników — ten sam artykuł nie jest analizowany dwa razy
-- Limit 15 artykułów per batch ≈ ~2000 tokenów input + ~1500 output
+## 5. Krok 3 — Dedup + Filter
+
+```typescript
+// lib/news/deduplicator.ts
+
+function deduplicateAndFilter(
+  articles: RawArticle[],
+  config: NewsAgentConfig
+): RawArticle[] {
+  const seen = new Map<string, RawArticle>();
+
+  for (const article of articles) {
+    const key = article.id;
+
+    if (seen.has(key)) {
+      // Same article for different ticker → merge tickers
+      const existing = seen.get(key)!;
+      existing.tickers = [...new Set([...existing.tickers, ...article.tickers])];
+    } else {
+      seen.set(key, article);
+    }
+  }
+
+  const cutoff = Date.now() - config.retention_hours * 60 * 60 * 1000;
+
+  return Array.from(seen.values())
+    .filter(a => a.publishedAt > cutoff)          // age filter
+    .filter(a => a.headline.length >= 20)          // spam filter
+    .filter(a => a.summary.length > 0)             // empty filter
+    .sort((a, b) => b.publishedAt - a.publishedAt) // newest first
+    .slice(0, config.max_articles_per_batch);       // batch limit
+}
+```
 
 ---
 
-### 3.5 Krok 4 — Formatter + Prioritizer
+## 6. Krok 4 — AI Analyst
 
-**Co robi:** Konwertuje przeanalizowane artykuły na `ChatBlock[]`
-i sortuje po priorytecie.
-
-**Logika sortowania:**
-1. **Critical** → na górze, z alert badge
-2. **High + affects portfolio** → następne
-3. **High** → dalej
-4. **Medium** → standardowy feed
-5. **Low** → zwinięte pod "więcej newsów"
-
-**Typy ChatBlocków generowanych:**
+**System prompt** (skrót — pełna wersja w `agents/NEWS_AGENT.md`):
 
 ```
+You are News Agent — a financial news analyst.
+
+You receive a batch of news articles about stocks the user
+is watching. The user's watchlist: {tickers from config}.
+
+For each article, produce JSON:
+{
+  "articleId": number,
+  "impactScore": number,    // -1.0 (very bearish) to +1.0 (very bullish)
+  "category": string,       // "earnings" | "macro" | "sector" | "company" | "regulatory"
+  "urgency": string,        // "low" | "medium" | "high" | "critical"
+  "interpretation": string, // 2-3 sentences: what does this mean for an investor?
+  "affectsPortfolio": bool, // true if article's ticker is in user's watchlist
+  "tags": string[]          // keywords: ["AI", "product-launch", "bullish"]
+}
+
+Additionally, if you detect a pattern across multiple articles
+(e.g. entire sector under pressure), generate a TrendInsight:
+{
+  "type": "trend",
+  "title": string,
+  "summary": string,
+  "affectedTickers": string[]
+}
+
+Respond ONLY with a JSON object:
+{
+  "articles": [...],
+  "trends": [...]
+}
+
+Language: match the user's language. If user writes in Polish,
+respond in Polish. If English, respond in English.
+```
+
+**Batch call strategy:**
+- All 15 articles in ONE call (not per-article)
+- Estimated tokens: ~2500 input + ~2000 output per batch
+- Gemini 2.0 Flash: negligible cost in dev
+- Cache: same article batch → skip AI call
+
+---
+
+## 7. Krok 5 — Formatter → ChatBlock types
+
+```typescript
+// lib/news/types.ts
+
+type ChatBlock =
+  | TextBlock
+  | NewsCardBlock
+  | AlertCardBlock
+  | TrendInsightBlock;
+
+interface NewsCardBlock {
+  type: "news_card";
+  articleId: number;
+  headline: string;
+  source: string;
+  timeAgo: string;               // "2h ago"
+  imageUrl?: string;
+  tickers: string[];
+  impactScore: number;           // visual: dots or bar
+  interpretation: string;
+  tags: string[];
+  url: string;                   // "Read more" → original article
+  affectsPortfolio: boolean;
+}
+
+interface AlertCardBlock {
+  type: "alert_card";
+  severity: "warning" | "critical";
+  headline: string;
+  source: string;
+  tickers: string[];
+  impactScore: number;
+  interpretation: string;
+  url: string;
+  actions: string[];             // ["View position", "Ask Orchestrator"]
+}
+
+interface TrendInsightBlock {
+  type: "trend_insight";
+  title: string;
+  summary: string;
+  affectedTickers: string[];
+  articleCount: number;
+}
+
+interface TextBlock {
+  type: "text";
+  content: string;               // AI conversational response
+}
+```
+
+**Visual mapping:**
+
+```
+AlertCard (critical):
 ┌─────────────────────────────────────────┐
 │ 🔴 CRITICAL ALERT                       │
 │ Tesla CEO Steps Down Effective Q3        │
-│ Impact: -0.8 | Source: Reuters           │
+│ Impact: ████████░░ -0.8 | Reuters        │
 │ "This leadership change creates major    │
 │  uncertainty for TSLA holders..."        │
 │                                         │
-│ TSLA jest w Twoim portfelu.             │
-│ [Zobacz pozycję] [Zapytaj Orchestrator] │
+│ TSLA is in your watchlist.              │
+│ [View position] [Ask Orchestrator]      │
 └─────────────────────────────────────────┘
 
+NewsCard (standard):
 ┌─────────────────────────────────────────┐
 │ 📰 Apple Announces New AI Features      │
-│ Impact: +0.6 ●●●○○ | CNBC | 2h ago    │
+│ Impact: ██████░░░░ +0.6 | CNBC | 2h ago│
 │ "New AI features could drive upgrade    │
 │  cycle and increase ASP..."             │
 │ #AI #product-launch #bullish            │
-│ [Czytaj więcej] [Dodaj do watchlist]    │
+│ [Read more]                             │
 └─────────────────────────────────────────┘
 
+TrendInsight:
 ┌─────────────────────────────────────────┐
-│ 📊 TREND INSIGHT                        │
-│ 4 artykuły wskazują na presję w         │
-│ sektorze tech z powodu regulacji AI     │
-│ Dotknięte tickery: AAPL, MSFT, GOOGL   │
-│ [Szczegóły] [Analizuj wpływ]           │
+│ 📊 TREND: Tech sector regulatory        │
+│ pressure — 4 articles                    │
+│ "Multiple sources report increased AI    │
+│  regulation talk impacting AAPL, MSFT,   │
+│  GOOGL"                                 │
+│ [Details]                               │
 └─────────────────────────────────────────┘
 ```
 
 ---
 
-### 3.6 Krok 5 — Chat Feed + Badge
+## 8. Conversational mode
 
-**Co robi:** Wyświetla ChatBlocki w workspace agenta + zarządza badge'ami.
+When user types a question in News Agent chat:
 
-**Badge logic:**
-- Nowe artykuły po analizie → inkrementuj badge na ikonie News Agenta
-- User otwiera czat News Agenta → badge = 0
-- Critical alert → badge kolor zmienia się na czerwony
-- Standardowe wiadomości → badge kolor niebieski
+```
+User input + context → API route → Gemini/Claude → response
+```
 
-**Interakcje w czacie:**
+**Context sent with each question:**
+- Last N analyzed articles (from store)
+- User's watchlist (from config)
+- User's question
 
-Użytkownik może:
-- **Scrollować feed** — chronologicznie, najnowsze na dole
-- **Kliknąć "Czytaj więcej"** — otwiera oryginalny artykuł w nowej karcie
-- **Kliknąć "Zapytaj Orchestrator"** — przekierowuje pytanie do Orchestratora
-  z kontekstem artykułu (cross-agent communication — Faza 2)
-- **Napisać pytanie** — np. "Co ten news znaczy dla mojego portfela?"
-  → Claude odpowiada z kontekstem artykułu + portfela
+**Example interactions:**
+- "Summarize today's news for AAPL"
+- "Is the TSLA news bad enough to worry about?"
+- "What are the biggest events this week?"
+- "Compare recent news sentiment for NVDA vs MSFT"
 
-**Pytania użytkownika (conversational mode):**
-
-Gdy user pisze w czacie, News Agent przechodzi w tryb konwersacyjny:
-1. Wiadomość usera + kontekst (ostatnie artykuły + portfel) → Claude
-2. Claude odpowiada naturalnie, powołując się na konkretne artykuły
-3. Może generować dodatkowe ChatBlocki (np. mini-chart porównawczy)
-
-Przykłady pytań:
-- "Podsumuj dzisiejsze newsy dla AAPL"
-- "Czy te newsy o regulacjach wpływają na moje pozycje?"
-- "Jakie są najważniejsze eventy w tym tygodniu?"
-- "Porównaj sentyment TSLA vs NVDA na podstawie newsów"
+**Response format:** `TextBlock` — natural language, may reference
+specific articles by headline.
 
 ---
 
-## 4. Dane Finnhub — endpointy które wykorzystamy
+## 9. File structure
 
 ```
-# Newsy per ticker (primary)
-GET /company-news?symbol=AAPL&from=2026-03-10&to=2026-03-11
-
-# Newsy ogólne (macro context)
-GET /news?category=general
-
-# Earnings calendar (uzupełnienie — wiemy kiedy są wyniki)
-GET /calendar/earnings?from=2026-03-10&to=2026-03-17
-
-# Cena aktualna (do kontekstu w analizie)
-GET /quote?symbol=AAPL
-
-# Rekomendacje analityków (dodatkowy sygnał)
-GET /recommendation?symbol=AAPL
-```
-
-Wszystko na free tier, z zapasem w rate limicie.
-
----
-
-## 5. Struktura plików (Next.js)
-
-```
-src/
-├── app/
-│   ├── api/
-│   │   └── news/
-│   │       ├── fetch/route.ts      ← cron fetch z Finnhub
-│   │       └── analyze/route.ts    ← wysyłka do Claude
-│   ├── dashboard/
-│   │   └── page.tsx                ← główny layout
-│   └── onboarding/
-│       └── page.tsx
-├── components/
-│   ├── agents/
-│   │   ├── AgentSidebar.tsx        ← okrągłe ikony + badge
-│   │   ├── AgentChat.tsx           ← kontener czatu
-│   │   └── NewsAgent/
-│   │       ├── NewsFeed.tsx        ← lista ChatBlocków
-│   │       ├── NewsCard.tsx        ← pojedynczy news
-│   │       ├── AlertCard.tsx       ← critical alert
-│   │       ├── TrendInsight.tsx    ← pattern summary
-│   │       └── NewsInput.tsx       ← pole do pytań
-│   └── market/
-│       ├── Chart.tsx
-│       ├── Watchlist.tsx
-│       └── OrderBook.tsx
-├── lib/
-│   ├── finnhub.ts                  ← Finnhub API client
-│   ├── claude.ts                   ← Claude API wrapper
-│   └── news/
-│       ├── fetcher.ts              ← krok 1
-│       ├── deduplicator.ts         ← krok 2
-│       ├── analyzer.ts             ← krok 3 (Claude call)
-│       ├── formatter.ts            ← krok 4
-│       └── types.ts                ← interfejsy
-├── store/
-│   └── newsStore.ts                ← stan newsów (Zustand)
-└── agents/
-    └── news-agent-prompt.ts        ← system prompt News Agenta
+stockpilot/
+├── config.yaml                     ← MASTER CONFIG
+├── .env.local                      ← API keys (gitignored)
+│   FINNHUB_API_KEY=...
+│   GEMINI_API_KEY=...
+│   ANTHROPIC_API_KEY=...           (for later)
+│
+├── src/
+│   ├── app/
+│   │   ├── api/news/
+│   │   │   ├── fetch/route.ts      ← triggers Finnhub fetch
+│   │   │   ├── analyze/route.ts    ← triggers AI analysis
+│   │   │   └── chat/route.ts       ← conversational Q&A
+│   │   ├── dashboard/page.tsx
+│   │   └── onboarding/page.tsx
+│   │
+│   ├── components/
+│   │   ├── agents/
+│   │   │   ├── AgentSidebar.tsx    ← round icons + badges
+│   │   │   ├── AgentChat.tsx       ← chat container
+│   │   │   └── news/
+│   │   │       ├── NewsFeed.tsx    ← list of ChatBlocks
+│   │   │       ├── NewsCard.tsx
+│   │   │       ├── AlertCard.tsx
+│   │   │       ├── TrendInsight.tsx
+│   │   │       └── NewsInput.tsx
+│   │   └── market/
+│   │       ├── Chart.tsx
+│   │       └── Watchlist.tsx
+│   │
+│   ├── lib/
+│   │   ├── config.ts               ← loads & types config.yaml
+│   │   ├── news/
+│   │   │   ├── finnhub-client.ts   ← Finnhub API calls
+│   │   │   ├── deduplicator.ts     ← step 3
+│   │   │   ├── analyzer.ts         ← step 4 (AI call)
+│   │   │   ├── formatter.ts        ← step 5 (→ ChatBlock[])
+│   │   │   ├── scheduler.ts        ← interval from config
+│   │   │   └── types.ts            ← all interfaces
+│   │   └── ai/
+│   │       ├── gemini.ts           ← Gemini API wrapper
+│   │       └── claude.ts           ← Claude API wrapper (later)
+│   │
+│   └── store/
+│       └── newsStore.ts            ← Zustand
+│
+├── fixtures/                       ← mock data for dev
+│   └── finnhub-news.json
+│
+└── agents/                         ← system prompts (docs)
+    └── NEWS_AGENT.md
 ```
 
 ---
 
-## 6. Otwarte pytania do News Agenta
+## 10. Następne kroki
 
-| # | Pytanie | Rekomendacja |
-|---|---------|-------------|
-| 1 | Jak często fetchować newsy? | Co 5 min automatycznie + on-demand per ticker. W dev: manual trigger. |
-| 2 | Ile artykułów trzymać w pamięci? | Ostatnie 48h. Starsze archiwizować / usuwać. |
-| 3 | Język artykułów? | EN only na start. Finnhub ma głównie anglojęzyczne źródła. |
-| 4 | Czy News Agent odpowiada po polsku? | System prompt w EN, ale jeśli user pisze po polsku → odpowiedź po polsku. |
-| 5 | Ile kosztuje Claude per batch? | ~15 artykułów × Sonnet ≈ $0.01-0.02 per batch. Przy fetchu co 5 min = ~$3-6/dzień. Cache redukuje to znacząco. |
-
----
-
-## 7. Następne kroki
-
-1. **Walidacja tego dokumentu** — uwagi, zmiany
-2. **Założenie konta Finnhub** — klucz API (free tier)
-3. **Pisanie system promptu** News Agenta (`agents/NEWS_AGENT.md`)
-4. **Scaffold projektu** — Next.js + podstawowa struktura
-5. **Implementacja Krok 1-2** — fetcher + deduplicator (bez Claude)
-6. **Implementacja Krok 3-5** — Claude analysis + feed UI
+1. **✅ Walidacja** — tego dokumentu + config.yaml
+2. **Założenie kont** — Finnhub (free key) + Gemini API key
+3. **System prompt News Agenta** → `agents/NEWS_AGENT.md`
+4. **Scaffold Next.js** + config loader
+5. **finnhub-client.ts** — fetcher z real data
+6. **UI** — AgentSidebar + NewsFeed (mock data → real data)
