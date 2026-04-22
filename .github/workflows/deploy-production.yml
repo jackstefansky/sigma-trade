@@ -7,7 +7,7 @@ on:
 
 defaults:
   run:
-    working-directory: sigmatrade
+    working-directory: .
 
 jobs:
   # Run quality checks before deploying — never ship broken code
@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: sigmatrade/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
       - run: npm run lint
@@ -51,7 +51,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: sigmatrade/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
 
