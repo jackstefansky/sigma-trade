@@ -27,6 +27,7 @@ export default function MarketView() {
     isLoading,
     usingMockData,
     candleCache,
+    candleIsMock,
     quoteCache,
     setActiveTicker,
     setLoading,
@@ -51,7 +52,9 @@ export default function MarketView() {
   useEffect(() => {
     if (!activeTicker) return;
     const cacheKey = `${activeTicker}:${timeframe}`;
-    if (candleCache[cacheKey]) return;
+    // Pomijamy fetch tylko gdy mamy REALNE dane w cache. Jeśli zacacheowany
+    // wynik był mockiem (chwilowy rate-limit), ponawiamy próbę realnych danych.
+    if (candleCache[cacheKey] && !candleIsMock[cacheKey]) return;
 
     const controller = new AbortController();
     setLoading(true);
@@ -65,7 +68,7 @@ export default function MarketView() {
         return r.json() as Promise<ChartApiResponse>;
       })
       .then((data) => {
-        setCandleCache(cacheKey, data.candles);
+        setCandleCache(cacheKey, data.candles, data.usingMockData);
         if (data.quote) setQuoteCache(activeTicker, data.quote);
         setUsingMockData(data.usingMockData);
       })
