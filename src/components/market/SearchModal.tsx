@@ -182,7 +182,7 @@ export default function SearchModal({ onClose }: SearchModalProps) {
     if (status === 'empty')
       return (
         <p className="px-4 py-10 text-center font-mono text-xs text-zinc-500">
-          Brak wyników dla <span className="text-zinc-300">"{query}"</span>
+          Brak wyników dla <span className="text-zinc-300">&quot;{query}&quot;</span>
         </p>
       );
     return (

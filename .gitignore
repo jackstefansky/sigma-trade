@@ -35,3 +35,6 @@ Thumbs.db
 .vercel
 .vercel/
 .env*.local
+
+# Claude Code
+Docs/CLAUDE.md

@@ -44,26 +44,8 @@ export async function GET(req: Request): Promise<NextResponse> {
   const now = Date.now();
   const cacheKey = `${symbol}:${timeframe}`;
 
-  // ── Candles ──────────────────────────────────────────────────
-  const cachedCandle = candleCache.get(cacheKey);
-  let candles: Candle[];
-  let usingMockData = false;
-
-  if (cachedCandle && cachedCandle.expiresAt > now) {
-    candles = cachedCandle.candles;
-    usingMockData = cachedCandle.usingMockData;
-  } else {
-    try {
-      candles = await fetchCandles(symbol, timeframe);
-    } catch (err) {
-      console.warn(`[chart] candle fetch failed for ${symbol}/${timeframe}:`, err);
-      usingMockData = true;
-      candles = generateMockCandles(symbol, timeframe);
-    }
-    candleCache.set(cacheKey, { candles, usingMockData, expiresAt: now + CANDLE_TTL });
-  }
-
   // ── Quote (symbol-level cache, not timeframe-level) ──────────
+  // Pobierane PRZED świecami, by realna cena mogła zakotwiczyć mock-fallback.
   const cachedQuote = quoteCache.get(symbol);
   let quote: QuoteData | null = null;
 
@@ -78,6 +60,30 @@ export async function GET(req: Request): Promise<NextResponse> {
       // Fall back to stale quote rather than returning null
       quote = cachedQuote?.quote ?? null;
     }
+  }
+
+  // ── Candles ──────────────────────────────────────────────────
+  const cachedCandle = candleCache.get(cacheKey);
+  let candles: Candle[];
+  let usingMockData = false;
+
+  if (cachedCandle && cachedCandle.expiresAt > now) {
+    candles = cachedCandle.candles;
+    usingMockData = cachedCandle.usingMockData;
+  } else {
+    try {
+      candles = await fetchCandles(symbol, timeframe);
+    } catch (err) {
+      console.warn(`[chart] candle fetch failed for ${symbol}/${timeframe}:`, err);
+      usingMockData = true;
+      // Kotwiczymy mock do realnej ceny z quote (jeśli mamy), żeby fallback
+      // nie pokazywał absurdalnych wartości (np. sprzed splitu).
+      candles = generateMockCandles(symbol, timeframe, quote?.price);
+    }
+    // Mock cache'ujemy krócej (30 s), żeby szybko ponowić próbę realnych danych
+    // gdy minie chwilowy rate-limit; realne dane — pełne 5 min.
+    const ttl = usingMockData ? 30 * 1000 : CANDLE_TTL;
+    candleCache.set(cacheKey, { candles, usingMockData, expiresAt: now + ttl });
   }
 
   const response: ChartApiResponse = { candles, quote, usingMockData };

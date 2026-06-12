@@ -10,6 +10,7 @@ import MarketView from '@/components/market/MarketView';
 import ProfileButton from '@/components/ui/ProfileButton';
 import { X } from 'lucide-react';
 import MobileTickerDrawer from '@/components/market/MobileTickerDrawer';
+import PriceDebugPanel from '@/components/market/PriceDebugPanel'; // [DEBUG — do usunięcia]
 
 interface Props {
   agents: AgentMeta[];
@@ -22,6 +23,9 @@ export default function DashboardClient({ agents, intervalSeconds, autoFetch }: 
 
   return (
     <div className="flex flex-col h-screen bg-bg-base overflow-hidden">
+      {/* [DEBUG — do usunięcia] panel porównania cen NVDA z obu API */}
+      <PriceDebugPanel />
+
       {/* TopBar */}
       <header className="h-12 flex items-center justify-between px-4 border-b border-subtle shrink-0">
         <div className="flex items-center gap-3">
