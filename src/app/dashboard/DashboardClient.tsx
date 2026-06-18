@@ -24,7 +24,7 @@ import { X } from 'lucide-react';
 import MobileTickerDrawer from '@/components/market/MobileTickerDrawer';
 import { cn } from '@/lib/utils';
 
-const SIDEBAR_PX = 80; // szerokość kolumny ikon agentów
+const SIDEBAR_WIDTH = 80; // szerokość kolumny ikon agentów
 const MIN_RIGHT_PCT = 15;
 const MAX_RIGHT_PCT = 70;
 
