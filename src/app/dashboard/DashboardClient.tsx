@@ -24,7 +24,7 @@ import { X } from 'lucide-react';
 import MobileTickerDrawer from '@/components/market/MobileTickerDrawer';
 import { cn } from '@/lib/utils';
 
-const SIDEBAR_PX = 80; // szerokość kolumny ikon agentów
+const SIDEBAR_WIDTH = 80; // szerokość kolumny ikon agentów
 const MIN_RIGHT_PCT = 15;
 const MAX_RIGHT_PCT = 70;
 
@@ -57,9 +57,9 @@ export default function DashboardClient({ agents, intervalSeconds, autoFetch, us
       if (!desktopRef.current) return;
       const { left, width } = desktopRef.current.getBoundingClientRect();
       // Uchwyt = lewa krawędź panelu newsów. Prawa krawędź panelu kończy się
-      // przy stałej kolumnie ikon (SIDEBAR_PX), więc szerokość newsów liczymy
+      // przy stałej kolumnie ikon (SIDEBAR_WIDTH), więc szerokość newsów liczymy
       // od kursora do początku ikon.
-      const newsWidthPx = left + width - SIDEBAR_PX - e.clientX;
+      const newsWidthPx = left + width - SIDEBAR_WIDTH - e.clientX;
       const pct = (newsWidthPx / width) * 100;
       setRightPct(Math.min(MAX_RIGHT_PCT, Math.max(MIN_RIGHT_PCT, pct)));
     };
