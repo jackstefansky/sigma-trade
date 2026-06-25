@@ -92,6 +92,7 @@ export default function DashboardClient({ agents, intervalSeconds, autoFetch, us
   // dopiero gdy Coach jest włączony. Mobile pomijamy (onboarding rusza w panelu).
   useEffect(() => {
     if (!coachEnabled) return;
+    if ('Cypress' in window) return; // popup blokuje DCA/portfolio testy w CI
     if (localStorage.getItem(COACH_INTRO_SEEN_KEY) === '1') return;
     setShowCoachIntro(true);
   }, [coachEnabled]);
