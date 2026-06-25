@@ -121,7 +121,6 @@ export default function DcaPanel() {
                 </div>
                 <div className="font-mono text-[9px] text-zinc-500 mt-0.5">
                   Następny: {fmtDate(p.nextRunAt)}
-                  {p.carryUsd > 0 && ` · reszta ${fmtUSD(p.carryUsd)}`}
                 </div>
               </div>
               <button

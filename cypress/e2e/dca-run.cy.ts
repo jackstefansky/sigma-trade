@@ -5,10 +5,10 @@
 // crona GET /api/dca/run i weryfikuje operację zakupu end-to-end: tworzy plan
 // due-teraz, odpala skan i sprawdza, że cron przetworzył NASZ plan.
 //
-// Z natury niedeterministyczny (realna baza, Finnhub, godziny sesji US):
-//   • rynek otwarty → plan wykonany: lastRunAt ustawione, nextRunAt przesunięty,
-//     pozycja tickera rośnie (potem odkupujemy, by przywrócić stan konta),
-//   • rynek zamknięty → cron ODRACZA: deferred, plan nietknięty (lastRunAt null).
+// Z natury niedeterministyczny (realna baza, Finnhub). Rynek zamknięty NIE
+// blokuje (demo mode) — zakup idzie po ostatniej cenie zamknięcia. Po egzekucji:
+// lastRunAt ustawione, nextRunAt przesunięty, pozycja tickera rośnie (potem
+// odkupujemy ułamek z powrotem, by przywrócić stan konta).
 //
 // Wymaga `CRON_SECRET` w .env.local (cypress.config.ts wczytuje go do Cypress.env;
 // Next używa tego samego pliku dla apki + SUPABASE_SERVICE_ROLE_KEY). Bez sekretu
@@ -20,7 +20,7 @@ const email = Cypress.env('TEST_EMAIL') as string;
 const password = Cypress.env('TEST_PASSWORD') as string;
 const CRON_SECRET = Cypress.env('CRON_SECRET') as string | undefined;
 
-// Tani ticker → budżet $100 wystarcza na ≥1 całą akcję (floor(budget/price) ≥ 1).
+// Dowolny ticker — przy ułamkach budżet $100 zawsze daje quantity > 0.
 const TICKER = 'F';
 const AMOUNT = 100;
 
@@ -36,7 +36,7 @@ function ownedQty(positions: Position[]): number {
 describe('DCA — egzekucja zakupu przez cron (integracja)', () => {
   beforeEach(() => cy.login(email, password));
 
-  it('cron przetwarza due-plan: kupuje (rynek otwarty) albo odracza (zamknięty)', function () {
+  it('cron przetwarza due-plan: kupuje ułamek tickera za budżet', function () {
     // Brak skonfigurowanego sekretu crona — nie ma czego testować.
     // (skip rzutowane na () => void, by jawny return zakończył blok bez
     //  oznaczania reszty testu jako „unreachable" — Mocha typuje skip jako never.)
@@ -68,37 +68,25 @@ describe('DCA — egzekucja zakupu przez cron (integracja)', () => {
     }).then((res) => {
       expect(res.status).to.eq(200);
 
-      if (res.body.deferred) {
-        // ── Rynek zamknięty: nic nie kupiono, plan nietknięty ──
-        expect(res.body.ran).to.eq(0);
-        cy.request('GET', '/api/dca').then((list) => {
-          const mine = (list.body.plans as Array<{ id: string; lastRunAt: string | null }>).find(
-            (p) => p.id === planId,
-          );
-          expect(mine, 'plan nadal istnieje').to.not.equal(undefined);
-          expect(mine!.lastRunAt, 'plan nieprzetworzony przy zamkniętym rynku').to.equal(null);
-        });
-      } else {
-        // ── Rynek otwarty: nasz due-plan został przetworzony ──
-        expect(res.body.ran).to.be.greaterThan(0);
+      // ── Nasz due-plan został przetworzony (rynek zamknięty nie blokuje) ──
+      expect(res.body.ran).to.be.greaterThan(0);
 
-        cy.request('GET', '/api/dca').then((list) => {
-          const mine = (
-            list.body.plans as Array<{ id: string; lastRunAt: string | null; nextRunAt: string }>
-          ).find((p) => p.id === planId);
-          expect(mine, 'plan przetworzony przez cron').to.not.equal(undefined);
-          expect(mine!.lastRunAt, 'lastRunAt ustawione po egzekucji').to.not.equal(null);
-          // next_run_at przesunięty w przyszłość (kadencja tygodniowa, +7 dni).
-          expect(new Date(mine!.nextRunAt).getTime()).to.be.greaterThan(Date.now());
-        });
+      cy.request('GET', '/api/dca').then((list) => {
+        const mine = (
+          list.body.plans as Array<{ id: string; lastRunAt: string | null; nextRunAt: string }>
+        ).find((p) => p.id === planId);
+        expect(mine, 'plan przetworzony przez cron').to.not.equal(undefined);
+        expect(mine!.lastRunAt, 'lastRunAt ustawione po egzekucji').to.not.equal(null);
+        // next_run_at przesunięty w przyszłość (kadencja tygodniowa, +7 dni).
+        expect(new Date(mine!.nextRunAt).getTime()).to.be.greaterThan(Date.now());
+      });
 
-        // Operacja zakupu: pozycja tickera urosła; odkup, by przywrócić konto.
-        cy.request('GET', '/api/portfolio').then((res2) => {
-          const delta = ownedQty(res2.body.positions) - before.qty;
-          expect(delta, 'kupiono ≥1 całą akcję za budżet').to.be.greaterThan(0);
-          cy.request('POST', '/api/orders', { ticker: TICKER, side: 'sell', quantity: delta });
-        });
-      }
+      // Operacja zakupu: pozycja tickera urosła; odkup ułamek, by przywrócić konto.
+      cy.request('GET', '/api/portfolio').then((res2) => {
+        const delta = ownedQty(res2.body.positions) - before.qty;
+        expect(delta, 'kupiono ułamek akcji za budżet').to.be.greaterThan(0);
+        cy.request('POST', '/api/orders', { ticker: TICKER, side: 'sell', quantity: delta });
+      });
     });
 
     // 4) Sprzątanie — usuń plan testowy (po wszystkich powyższych komendach).

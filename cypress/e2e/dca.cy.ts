@@ -27,7 +27,6 @@ const plan = (overrides: Partial<DcaPlan> = {}): DcaPlan => ({
   id: 'p1',
   ticker: 'AAPL',
   amountUsd: 100,
-  carryUsd: 0,
   status: 'active',
   nextRunAt: new Date('2026-07-01T15:00:00Z').toISOString(),
   lastRunAt: null,
@@ -80,11 +79,11 @@ describe('DCA — cykliczny zakup', () => {
     dcaPanel().contains('Brak planów DCA').should('be.visible');
   });
 
-  // 2) Lista planów — ticker, kwota tygodniowa i przeniesiona reszta.
-  it('pokazuje istniejący plan z kwotą/tydzień i resztą (carry)', () => {
+  // 2) Lista planów — ticker i kwota tygodniowa.
+  it('pokazuje istniejący plan z kwotą/tydzień', () => {
     cy.intercept('GET', '**/api/dca', {
       statusCode: 200,
-      body: { plans: [plan({ ticker: 'AAPL', amountUsd: 100, carryUsd: 40 })] },
+      body: { plans: [plan({ ticker: 'AAPL', amountUsd: 100 })] },
     }).as('dca');
     stubBase();
 
@@ -94,7 +93,6 @@ describe('DCA — cykliczny zakup', () => {
     dcaPanel().within(() => {
       cy.contains('AAPL').should('be.visible');
       cy.contains('$100.00/tydz.').should('be.visible');
-      cy.contains('reszta $40.00').should('be.visible'); // carry_usd > 0
     });
   });
 

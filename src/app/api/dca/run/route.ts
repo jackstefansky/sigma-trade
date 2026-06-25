@@ -6,7 +6,7 @@
 // • Działa kluczem service-role (brak sesji usera) — RLS pominięte, dlatego
 //   każdy filtr per-portfel jest tu jawny.
 // • Rynek zamknięty → zakup idzie po ostatniej cenie zamknięcia (demo mode).
-// • Handel CAŁYMI akcjami: kup floor(budżet/cena), resztę przenieś (carry_usd).
+// • Akcje UŁAMKOWE: kup budżet/cena (ograniczone dostępnym cash) — bez reszty.
 //   Po egzekucji next_run_at += 7 dni.
 // ============================================================
 import { NextResponse } from 'next/server';
@@ -31,7 +31,7 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   const { data: due, error } = await supabase
     .from('dca_plans')
-    .select('id, portfolio_id, ticker, amount_usd, carry_usd, next_run_at')
+    .select('id, portfolio_id, ticker, amount_usd, next_run_at')
     .eq('status', 'active')
     .lte('next_run_at', now.toISOString());
 
@@ -63,10 +63,9 @@ export async function GET(req: Request): Promise<NextResponse> {
       };
 
       const price = await getExecutionPrice(supabase, plan.ticker);
-      const budget = Number(plan.amount_usd) + Number(plan.carry_usd);
-      const { quantity, carry } = planDcaBuy(budget, price, portfolio.cash);
+      const { quantity } = planDcaBuy(Number(plan.amount_usd), price, portfolio.cash);
 
-      if (quantity >= 1) {
+      if (quantity > 0) {
         await executeMarketOrder(supabase, portfolio, {
           ticker: plan.ticker,
           side: 'buy',
@@ -75,16 +74,15 @@ export async function GET(req: Request): Promise<NextResponse> {
         });
         bought += 1;
       } else {
-        // Nie stać na całą akcję w tym cyklu — budżet przechodzi dalej.
+        // Brak cash na zakup w tym cyklu — pomijamy, harmonogram i tak rusza dalej.
         skipped += 1;
       }
 
-      // Przesuń harmonogram o tydzień i zapisz przeniesioną resztę.
+      // Przesuń harmonogram o tydzień.
       const next = nextWeeklyRun(new Date(plan.next_run_at), now);
       await supabase
         .from('dca_plans')
         .update({
-          carry_usd: carry,
           last_run_at: now.toISOString(),
           next_run_at: next.toISOString(),
         })

@@ -9,6 +9,7 @@ import { usePortfolioStore } from '@/store/portfolioStore';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { cn } from '@/lib/utils';
 import { fmtUSD, fmtPct } from '@/lib/portfolio/format';
+import { fmtShares } from '@/lib/portfolio/shares';
 
 export default function PositionsPanel() {
   const portfolio = usePortfolioStore((s) => s.portfolio);
@@ -58,7 +59,7 @@ export default function PositionsPanel() {
               </div>
               <div className="flex items-center justify-between mt-0.5">
                 <span className="font-mono text-[10px] text-zinc-500">
-                  {p.quantity} × {fmtUSD(p.avgEntryPrice)}
+                  {fmtShares(p.quantity)} × {fmtUSD(p.avgEntryPrice)}
                 </span>
                 <span className="font-mono text-[10px] text-zinc-400 tabular-nums">
                   {fmtUSD(p.currentPrice)}

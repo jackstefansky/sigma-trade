@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import { usePortfolioStore } from '@/store/portfolioStore';
 import { cn } from '@/lib/utils';
 import { fmtUSD, fmtSignedUSD } from '@/lib/portfolio/format';
+import { fmtShares } from '@/lib/portfolio/shares';
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -62,7 +63,7 @@ export default function HistoryPanel() {
               </div>
               <div className="flex items-center justify-between mt-0.5">
                 <span className="font-mono text-[10px] text-zinc-500">
-                  {t.quantity} × {fmtUSD(t.price)}
+                  {fmtShares(t.quantity)} × {fmtUSD(t.price)}
                 </span>
                 {t.realizedPnL != null && (
                   <span

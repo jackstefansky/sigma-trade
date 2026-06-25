@@ -19,7 +19,6 @@ interface DcaRow {
   id: string;
   ticker: string;
   amount_usd: number | string;
-  carry_usd: number | string;
   status: DcaPlan['status'];
   next_run_at: string;
   last_run_at: string | null;
@@ -31,7 +30,6 @@ function toPlan(r: DcaRow): DcaPlan {
     id: r.id,
     ticker: r.ticker,
     amountUsd: Number(r.amount_usd),
-    carryUsd: Number(r.carry_usd),
     status: r.status,
     nextRunAt: r.next_run_at,
     lastRunAt: r.last_run_at,
@@ -50,7 +48,7 @@ export async function GET(): Promise<NextResponse> {
     const portfolio = await getOrCreatePortfolio(supabase, user.id);
     const { data, error } = await supabase
       .from('dca_plans')
-      .select('id, ticker, amount_usd, carry_usd, status, next_run_at, last_run_at, created_at')
+      .select('id, ticker, amount_usd, status, next_run_at, last_run_at, created_at')
       .eq('portfolio_id', portfolio.id)
       .order('created_at', { ascending: false });
     if (error) throw error;
@@ -105,10 +103,10 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
 
     const now = new Date();
-    const { quantity, carry } = planDcaBuy(amountUsd, price, portfolio.cash);
+    const { quantity } = planDcaBuy(amountUsd, price, portfolio.cash);
 
     // Wykonaj pierwszy zakup od razu (jeśli stać).
-    if (quantity >= 1) {
+    if (quantity > 0) {
       await executeMarketOrder(supabase, portfolio, {
         ticker,
         side: 'buy',
@@ -125,11 +123,10 @@ export async function POST(req: Request): Promise<NextResponse> {
         portfolio_id: portfolio.id,
         ticker,
         amount_usd: amountUsd,
-        carry_usd: carry,
-        last_run_at: quantity >= 1 ? now.toISOString() : null,
+        last_run_at: quantity > 0 ? now.toISOString() : null,
         next_run_at: next.toISOString(),
       })
-      .select('id, ticker, amount_usd, carry_usd, status, next_run_at, last_run_at, created_at')
+      .select('id, ticker, amount_usd, status, next_run_at, last_run_at, created_at')
       .single();
     if (error || !data) throw error ?? new Error('Insert failed');
 

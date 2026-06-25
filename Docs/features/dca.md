@@ -5,22 +5,25 @@ danego tickera **co tydzień**", a egzekucja dzieje się **w tle** — także gd
 user nie ma otwartej aplikacji. Per-portfel, chronione RLS.
 
 > Faza 1 świadomie ogranicza się do interwału **tygodniowego** i akcji
-> **long-only / całe sztuki** (jak reszta portfela — patrz `portfolio.md`).
+> **long-only** (jak reszta portfela — patrz `portfolio.md`). Handlujemy
+> akcjami **ułamkowymi** (precyzja 6 miejsc).
 
 ---
 
 ## Zasady
 
 - **Budżet, nie liczba akcji.** Plan trzyma kwotę USD na cykl (`amount_usd`),
-  nie ilość akcji. Co tydzień kupujemy `floor(budżet / cena)` całych akcji.
-- **Reszta się nie marnuje.** Handlujemy całymi sztukami, więc niewykorzystana
-  reszta budżetu trafia do `carry_usd` i powiększa budżet następnego cyklu.
-  (np. budżet $100, cena $190 → 0 akcji, carry $100; za tydzień budżet $200 → 1 akcja.)
-- **Rynek zamknięty → odroczenie.** Gdy skan trafia na zamkniętą giełdę
-  (weekend / poza sesją), cron **nic nie kupuje** — plany zostają „due" i złapie
-  je najbliższy skan w sesji. Zakup wpada na najbliższą otwartą sesję.
-- **Limit cash.** Jeśli portfel nie ma środków na choćby 1 akcję, cykl jest
-  pomijany, budżet przechodzi dalej (carry), a harmonogram i tak rusza o tydzień.
+  nie ilość akcji. Co tydzień kupujemy `budżet / cena` akcji (ułamkowych).
+- **Brak reszty.** Skoro handlujemy ułamkami, cały budżet jest inwestowany co do
+  centa — nie ma „reszty" do przenoszenia (kolumna `carry_usd` została usunięta).
+- **Pierwszy zakup od razu.** Tworząc plan (`POST /api/dca`) wykonujemy pierwszy
+  zakup natychmiast po świeżej cenie; `next_run_at` ustawiamy na +7 dni. User
+  od razu widzi pozycję, nie czeka na nocny skan crona.
+- **Rynek zamknięty → zakup po ostatniej cenie zamknięcia (demo mode).** Cron
+  **nie** odracza przebiegu — żeby dało się pracować/demować w weekend. (Docelowo
+  można przywrócić blokadę — patrz `portfolio.md`, backlog.)
+- **Limit cash.** Jeśli portfel nie ma środków, cykl kupuje za tyle ile zostało
+  (lub jest pomijany przy zerowym cash); harmonogram i tak rusza o tydzień.
 
 ---
 
@@ -30,20 +33,21 @@ user nie ma otwartej aplikacji. Per-portfel, chronione RLS.
 UŻYTKOWNIK (zakładanie planu):
   DcaPanel → dcaStore.createPlan
     → POST /api/dca { ticker, amountUsd }      (klient usera, RLS)
-         walidacja tickera (getExecutionPrice) → insert dca_plans
-         next_run_at = now()   ← pierwszy zakup przy najbliższym skanie
+         cena = getExecutionPrice(ticker)   ← waliduje ticker + pierwszy zakup
+         { quantity } = planDcaBuy(amount, cena, cash)
+         quantity > 0 → executeMarketOrder(buy)   ← PIERWSZY ZAKUP OD RAZU
+         insert dca_plans: last_run_at = now(), next_run_at = +7 dni
 
-CRON (egzekucja w tle, codziennie):
+CRON (kolejne cykle w tle, codziennie):
   Vercel Cron  "0 15 * * 1-5"
     → GET /api/dca/run   (Authorization: Bearer CRON_SECRET)
-         isMarketOpen() == false → odrocz cały przebieg (nic nie rób)
          service-role client (omija RLS):
            select dca_plans where status='active' and next_run_at <= now
            dla każdego planu:
              cena = getExecutionPrice(ticker)
-             { quantity, carry } = planDcaBuy(amount + carry, cena, cash)
-             quantity >= 1 → executeMarketOrder(buy)   (positions/cash/trades)
-             update plan: carry_usd, last_run_at, next_run_at += 7 dni
+             { quantity } = planDcaBuy(amount, cena, cash)
+             quantity > 0 → executeMarketOrder(buy)   (positions/cash/trades)
+             update plan: last_run_at, next_run_at += 7 dni
 ```
 
 **Dlaczego dzienny skan, a nie harmonogram tygodniowy:** Vercel Hobby uruchamia
@@ -60,12 +64,14 @@ dca_plans (
   portfolio_id  → portfolios(id)   -- per-portfel, kaskada przy usunięciu
   ticker        text
   amount_usd    numeric            -- budżet na cykl
-  carry_usd     numeric            -- reszta przeniesiona z poprzedniego cyklu
   status        active|paused|cancelled
   next_run_at   timestamptz        -- kiedy plan jest „due"
   last_run_at   timestamptz | null
 )
 ```
+
+> `carry_usd` usunięte w `0003_fractional_shares.sql` — przy akcjach ułamkowych
+> nie ma reszty budżetu.
 
 RLS: user operuje tylko na planach swojego portfela (`portfolio_id in (select id
 from portfolios where user_id = auth.uid())`) — wzorzec z `0001`. Cron pomija RLS
@@ -78,9 +84,11 @@ kluczem **service-role**, więc każdy filtr per-portfel w `/api/dca/run` jest j
 | Plik | Rola |
 |---|---|
 | `supabase/migrations/0002_dca_plans.sql` | tabela `dca_plans` + RLS + indeks pod skan |
+| `supabase/migrations/0003_fractional_shares.sql` | ułamki (qty → numeric) + drop `carry_usd` |
 | `src/lib/portfolio/types.ts` | `DcaPlan`, `DcaPlanRequest`, `DcaStatus` |
-| `src/lib/portfolio/dca.ts` | czysta logika: `planDcaBuy` (qty/carry), `nextWeeklyRun` (+7d) |
-| `src/lib/portfolio/execute.ts` | `executeMarketOrder` — wspólna egzekucja buy/sell (cron) |
+| `src/lib/portfolio/dca.ts` | czysta logika: `planDcaBuy` (ułamkowa qty), `nextWeeklyRun` (+7d) |
+| `src/lib/portfolio/shares.ts` | precyzja akcji ułamkowych: `floorShares`/`roundShares`/`fmtShares` |
+| `src/lib/portfolio/execute.ts` | `executeMarketOrder` — wspólna egzekucja buy/sell (cron + API) |
 | `src/lib/supabase/service.ts` | klient service-role (TYLKO serwer, omija RLS) |
 | `src/app/api/dca/route.ts` | GET / POST / DELETE planów (sesja usera) |
 | `src/app/api/dca/run/route.ts` | endpoint crona — skan i egzekucja due-planów |
@@ -96,7 +104,7 @@ kluczem **service-role**, więc każdy filtr per-portfel w `/api/dca/run` jest j
 | Metoda / trasa | Auth | Działanie |
 |---|---|---|
 | `GET /api/dca` | sesja usera | lista planów usera |
-| `POST /api/dca` | sesja usera | utwórz plan `{ ticker, amountUsd }` (waliduje ticker) |
+| `POST /api/dca` | sesja usera | utwórz plan `{ ticker, amountUsd }` (waliduje ticker + pierwszy zakup od razu) |
 | `DELETE /api/dca?id=` | sesja usera | usuń plan |
 | `GET /api/dca/run` | `CRON_SECRET` | skan + egzekucja (Vercel Cron) |
 
@@ -117,7 +125,8 @@ kluczem **service-role**, więc każdy filtr per-portfel w `/api/dca/run` jest j
 
 ## Wdrożenie (kroki ręczne)
 
-1. **Migracja:** Supabase → SQL Editor → wklej `0002_dca_plans.sql` → Run.
+1. **Migracje:** Supabase → SQL Editor → wklej `0002_dca_plans.sql`, potem
+   `0003_fractional_shares.sql` → Run.
 2. **Env:** ustaw `SUPABASE_SERVICE_ROLE_KEY` i `CRON_SECRET` na Vercel
    (Production + Preview) oraz lokalnie w `.env`.
 3. Cron rejestruje się automatycznie z `vercel.json` przy deployu.
@@ -130,7 +139,7 @@ kluczem **service-role**, więc każdy filtr per-portfel w `/api/dca/run` jest j
 |---|---|
 | Cron zwraca 401 | brak / zły `CRON_SECRET` w env Vercel |
 | „SUPABASE_SERVICE_ROLE_KEY not set" | brak env; cron nie ma sesji usera, klucz jest wymagany |
-| Plan założony w weekend nie kupuje od razu | poprawne — `isMarketOpen()` odracza do najbliższej sesji |
-| Budżet < cena 1 akcji → brak zakupu | poprawne — budżet rośnie w `carry_usd` do kolejnego cyklu |
+| Plan założony w weekend kupuje od razu | poprawne (demo mode) — egzekucja po ostatniej cenie zamknięcia, bez odraczania |
+| Zerowy cash → brak zakupu | poprawne — `planDcaBuy` zwraca quantity 0, cykl pominięty, harmonogram rusza dalej |
 | Cron na Hobby nie odpala częściej niż raz/dzień | limit planu — kadencję tygodniową daje `next_run_at`, nie cron |
 | Wiele planów na ten sam portfel w jednym przebiegu | cash pobierany świeżo per plan (sekwencyjnie), brak stale cache |

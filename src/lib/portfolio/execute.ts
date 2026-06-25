@@ -37,11 +37,17 @@ export async function executeMarketOrder(
 
   let realizedPnL: number | null = null;
 
+  // Najpierw ruszamy POZYCJĄ, dopiero potem cash — i SPRAWDZAMY błąd każdego
+  // zapisu. Bez tego nieudany insert (np. zła kolumna/RLS) przechodził po cichu,
+  // a cash i tak był odejmowany → „znikające" pieniądze bez pozycji w portfelu.
+  let cashDelta: number;
+
   if (side === 'buy') {
     const cost = price * quantity;
     if (cost > portfolio.cash) {
       throw new OrderError('Za mało środków na zakup');
     }
+    cashDelta = -cost;
 
     if (posRow) {
       // Średnia ważona cena wejścia.
@@ -49,52 +55,54 @@ export async function executeMarketOrder(
       const oldAvg = Number(posRow.avg_entry_price);
       const newQty = oldQty + quantity;
       const newAvg = (oldAvg * oldQty + price * quantity) / newQty;
-      await supabase
+      const { error } = await supabase
         .from('positions')
         .update({ quantity: newQty, avg_entry_price: newAvg, updated_at: new Date().toISOString() })
         .eq('id', posRow.id);
+      if (error) throw new Error(`positions.update: ${error.message}`);
     } else {
-      await supabase.from('positions').insert({
+      const { error } = await supabase.from('positions').insert({
         portfolio_id: portfolio.id,
         ticker,
         quantity,
         avg_entry_price: price,
       });
+      if (error) throw new Error(`positions.insert: ${error.message}`);
     }
-
-    await supabase
-      .from('portfolios')
-      .update({ cash: portfolio.cash - cost })
-      .eq('id', portfolio.id);
   } else {
     // SELL
     if (!posRow || Number(posRow.quantity) < quantity) {
       throw new OrderError('Za mało akcji do sprzedaży');
     }
+    cashDelta = price * quantity;
 
     const oldQty = Number(posRow.quantity);
     const avg = Number(posRow.avg_entry_price);
     realizedPnL = (price - avg) * quantity;
     const newQty = oldQty - quantity;
 
-    if (newQty === 0) {
-      await supabase.from('positions').delete().eq('id', posRow.id);
+    if (newQty <= 0) {
+      const { error } = await supabase.from('positions').delete().eq('id', posRow.id);
+      if (error) throw new Error(`positions.delete: ${error.message}`);
     } else {
       // Częściowa sprzedaż — reszta zachowuje tę samą avg entry.
-      await supabase
+      const { error } = await supabase
         .from('positions')
         .update({ quantity: newQty, updated_at: new Date().toISOString() })
         .eq('id', posRow.id);
+      if (error) throw new Error(`positions.update: ${error.message}`);
     }
-
-    await supabase
-      .from('portfolios')
-      .update({ cash: portfolio.cash + price * quantity })
-      .eq('id', portfolio.id);
   }
 
+  // Cash dopiero po udanej zmianie pozycji.
+  const { error: cashErr } = await supabase
+    .from('portfolios')
+    .update({ cash: portfolio.cash + cashDelta })
+    .eq('id', portfolio.id);
+  if (cashErr) throw new Error(`portfolios.update: ${cashErr.message}`);
+
   // Wpis do historii (niezmienny ledger).
-  await supabase.from('trades').insert({
+  const { error: tradeErr } = await supabase.from('trades').insert({
     portfolio_id: portfolio.id,
     ticker,
     side,
@@ -102,6 +110,7 @@ export async function executeMarketOrder(
     price,
     realized_pnl: realizedPnL,
   });
+  if (tradeErr) throw new Error(`trades.insert: ${tradeErr.message}`);
 
   return { realizedPnL };
 }
