@@ -111,7 +111,7 @@ describe('DCA — cykliczny zakup', () => {
     dcaPanel().within(() => {
       cy.get('input[placeholder="TICKER"]').clear().type('MSFT');
       cy.get('input[type="number"]').clear().type('250');
-      cy.contains('button', 'Dodaj plan').click();
+      cy.contains('button', 'Add plan').click();
     });
 
     cy.wait('@dcaCreate').its('request.body').should('deep.equal', {
@@ -140,7 +140,7 @@ describe('DCA — cykliczny zakup', () => {
     dcaPanel().within(() => {
       cy.get('input[placeholder="TICKER"]').clear().type('ZZZZ');
       cy.get('input[type="number"]').clear().type('100');
-      cy.contains('button', 'Dodaj plan').click();
+      cy.contains('button', 'Add plan').click();
     });
     cy.wait('@dcaCreate');
 
