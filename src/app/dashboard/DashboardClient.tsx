@@ -41,7 +41,7 @@ const MIN_RIGHT_PCT = 15;
 const MAX_RIGHT_PCT = 70;
 
 // Klucz „widziałem powitanie Coacha" — bump sufiksu = popup pokaże się znów.
-const COACH_INTRO_SEEN_KEY = 'coach_intro_seen_v1';
+const coachIntroKey = (email: string) => `coach_intro_seen_v1_${email}`;
 
 // Etykiety paneli (mobilny nagłówek overlay).
 const AGENT_LABELS: Record<AgentId, string> = {
@@ -90,25 +90,27 @@ export default function DashboardClient({ agents, intervalSeconds, autoFetch, us
 
   // Jednorazowe powitanie nowej funkcji (desktop) — pokazujemy raz na przeglądarkę,
   // dopiero gdy Coach jest włączony. Mobile pomijamy (onboarding rusza w panelu).
+  const introKey = coachIntroKey(userEmail);
+
   useEffect(() => {
     if (!coachEnabled) return;
     // W Cypress blokujemy popup domyślnie — zasłania DCA/portfolio testy.
     // Test sprawdzający popup sam ustawia flagę 'cypress_show_coach_intro'.
     if ('Cypress' in window && !localStorage.getItem('cypress_show_coach_intro')) return;
-    if (localStorage.getItem(COACH_INTRO_SEEN_KEY) === '1') return;
+    if (localStorage.getItem(introKey) === '1') return;
     setShowCoachIntro(true);
-  }, [coachEnabled]);
+  }, [coachEnabled, introKey]);
 
   const dismissCoachIntro = useCallback(() => {
-    localStorage.setItem(COACH_INTRO_SEEN_KEY, '1');
+    localStorage.setItem(introKey, '1');
     setShowCoachIntro(false);
-  }, []);
+  }, [introKey]);
 
   const openCoachFromIntro = useCallback(() => {
-    localStorage.setItem(COACH_INTRO_SEEN_KEY, '1');
+    localStorage.setItem(introKey, '1');
     setShowCoachIntro(false);
     setActiveAgent('coach');
-  }, []);
+  }, [introKey]);
 
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
