@@ -15,7 +15,9 @@ zostawiamy tu tylko aktualny status i kierunek.
 - **News Agent** — fetch z Finnhub, dedup, analiza AI on-demand (Gemini/Claude)
 - **Logowanie** (Supabase Auth) + ochrona tras (middleware) — `features/auth.md`
 - **Portfel / paper trading** (Supabase) — kup/sprzedaj, pozycje, historia, P/L,
-  cache cen — `features/portfolio.md`
+  cache cen, **akcje ułamkowe** (kwota $ ⇄ ilość) — `features/portfolio.md`
+- **DCA** — cykliczny zakup „za X$ co tydzień", pierwszy zakup od razu, cron w tle
+  — `features/dca.md`
 - CI/CD (GitHub Actions + Vercel) + testy e2e (Cypress)
 
 ---

@@ -11,8 +11,9 @@
 - **Waluta:** USD — balans i ceny w jednej walucie, zero przeliczników FX.
 - **Instrumenty:** wyłącznie akcje notowane w USA, **long only** (kup → trzymaj → sprzedaj).
   Bez CFD, shortów i dźwigni. *Keep it simple.*
-- **Jednostka:** całe akcje. Częściowa sprzedaż dozwolona (np. 5 z 10 akcji),
-  ale minimum **1 akcja** — bez ułamków (0.5 akcji niedozwolone).
+- **Jednostka:** akcje **ułamkowe** (precyzja 6 miejsc, jak Robinhood). Można kupić
+  „za $100" (ilość liczona po cenie egzekucji) albo podać dokładną ilość (np. 0.5).
+  Częściowa sprzedaż dozwolona; sprzedaż „za $X" przycina się do posiadanej ilości.
 - **Balans startowy:** do wyboru przy starcie — 10 000 / 50 000 / 100 000 USD.
 
 > ⚠️ **Uwaga:** instrumenty muszą być realnie notowane. Spółki prywatne
@@ -134,7 +135,8 @@ i stan portfela. Dlatego:
   z zakładkami**: Watchlist / Pozycje / Historia.
 - **Portfel/balans** → TopBar (stały podgląd) + klik = pełny widok.
 - **Kup/Sprzedaj** → panel pod wykresem (kontekst: widzisz wykres
-  i od razu składasz zlecenie) lub modal.
+  i od razu składasz zlecenie) lub modal. Dwa sprzężone pola: **kwota $ ⇄ ilość
+  akcji** (edycja jednego przelicza drugie po cenie z cache).
 - **Panel agenta** (ikony po prawej) — bez zmian, dochodzi Risk Agent.
 
 ### Mobile
@@ -150,7 +152,7 @@ portfel skrócony w TopBarze.
 | **Pozycje** | otwarte akcje: ilość, avg entry, cena aktualna, P/L % | sidebar tab |
 | **Historia** | log buy/sell + realized P/L | sidebar tab |
 | **Portfel/Balans** | cash, total value, P/L % | TopBar + pełny widok |
-| **Kup/Sprzedaj** | wybór instrumentu, ilość, podgląd kosztu | panel pod wykresem |
+| **Kup/Sprzedaj** | wybór instrumentu, kwota $ ⇄ ilość (ułamkowa) | panel pod wykresem |
 
 ### Rekomendacja wdrożenia
 Jeden komponent zakładek obsługuje oba tryby: jako **sidebar** (desktop)
@@ -162,8 +164,11 @@ To naturalna ewolucja obecnej watchlisty, nie przepisywanie od zera.
 ## 7. Walidacja (serwerowa)
 
 - Nie można kupić za więcej niż dostępny **cash**.
-- Nie można sprzedać więcej akcji niż się **posiada**.
-- Cena egzekucji zawsze ze świeżego `/quote` (nie z UI / nie z cache).
+- Nie można sprzedać więcej akcji niż się **posiada** (sprzedaż „za $X" przycinana
+  do posiadanej ilości — czyste pełne wyjście bez „pyłu").
+- Cena egzekucji zawsze ze świeżego `/quote` (nie z UI / nie z cache). Ilość ułamkowa
+  liczona po cenie egzekucji: `amountUsd` → `floor(amount / cena)` (6 miejsc).
+- `POST /api/orders` przyjmuje **dokładnie jedno** z: `amountUsd` lub `quantity`.
 
 ---
 
@@ -171,10 +176,12 @@ To naturalna ewolucja obecnej watchlisty, nie przepisywanie od zera.
 
 ```
 portfolios   (user_id, cash, initial_balance)
-positions    (portfolio_id, ticker, quantity, avg_entry_price)
-trades       (portfolio_id, ticker, side, quantity, price, executed_at, realized_pnl)
+positions    (portfolio_id, ticker, quantity, avg_entry_price)   -- quantity numeric(18,6)
+trades       (portfolio_id, ticker, side, quantity, price, executed_at, realized_pnl)  -- quantity numeric(18,6)
 price_cache  (ticker, price, fetched_at)   -- wspólny dla wszystkich userów
 ```
+
+> `quantity` to `numeric(18,6)` (akcje ułamkowe) — patrz `0003_fractional_shares.sql`.
 
 Zasada: **cena nigdy nie liczona w UI**. Pozycje wyliczane z transakcji,
 historia to niezmienny ledger, cache cen to jedyne źródło prawdy dla

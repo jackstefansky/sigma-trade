@@ -35,11 +35,14 @@ export interface PortfolioState {
   positions: Position[];
 }
 
-// Body POST /api/orders
+// Body POST /api/orders — podaj DOKŁADNIE jedno z:
+//   • amountUsd — kup/sprzedaj „za X$" (ilość ułamkowa liczona po cenie egzekucji)
+//   • quantity  — dokładna ilość akcji (ułamkowa); m.in. pełne wyjście z pozycji
 export interface OrderRequest {
   ticker: string;
   side: 'buy' | 'sell';
-  quantity: number;
+  amountUsd?: number;
+  quantity?: number;
 }
 
 // Odpowiedź POST /api/orders
@@ -51,4 +54,26 @@ export interface OrderResult {
   executionPrice: number;
   realizedPnL: number | null;
   portfolio: PortfolioState;
+}
+
+// ============================================================
+// DCA — cykliczny zakup „za X$ co tydzień" (wyzwalany w tle przez cron)
+// ============================================================
+export type DcaStatus = 'active' | 'paused' | 'cancelled';
+
+// Plan DCA (wiersz tabeli dca_plans, znormalizowany do camelCase).
+export interface DcaPlan {
+  id: string;
+  ticker: string;
+  amountUsd: number;        // budżet na jeden cykl (tygodniowy)
+  status: DcaStatus;
+  nextRunAt: string;        // ISO — kiedy plan jest „due"
+  lastRunAt: string | null; // ISO ostatniej egzekucji (lub null)
+  createdAt: string;
+}
+
+// Body POST /api/dca
+export interface DcaPlanRequest {
+  ticker: string;
+  amountUsd: number;
 }

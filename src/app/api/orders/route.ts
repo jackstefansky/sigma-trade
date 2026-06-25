@@ -1,18 +1,18 @@
 // ============================================================
-// POST /api/orders   body: { ticker, side: 'buy'|'sell', quantity }
+// POST /api/orders   body: { ticker, side, amountUsd? | quantity? }
 //
 // Egzekucja po ŚWIEŻEJ cenie z Finnhub (nie z cache / nie z UI).
-// Walidacja serwerowa: dość cash przy kupnie, dość akcji przy sprzedaży.
-// Aktualizuje pozycję (avg entry ważona), cash i dopisuje wpis do historii.
-//
-// Uwaga: operacje nie są opakowane w transakcję SQL (Supabase JS).
-// Dla paper-tradingu jednego usera ryzyko wyścigu jest pomijalne;
-// docelowo można przenieść do funkcji Postgres (RPC) dla atomowości.
+//   • amountUsd → ilość ułamkowa = floor(amount / cena) (zakup nie przekracza budżetu)
+//   • quantity  → dokładna ilość (ułamkowa), np. pełne wyjście z pozycji
+// Sprzedaż „za X$" jest przycinana do posiadanej ilości (bez pyłu / oversell).
+// Walidacja biznesowa (cash / akcje) w executeMarketOrder → OrderError = 400.
 // ============================================================
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getOrCreatePortfolio, buildPortfolioState } from '@/lib/portfolio/service';
 import { getExecutionPrice } from '@/lib/portfolio/prices';
+import { executeMarketOrder, OrderError } from '@/lib/portfolio/execute';
+import { floorShares, roundShares } from '@/lib/portfolio/shares';
 import { isMarketOpen } from '@/lib/market/hours';
 import type { OrderRequest, OrderResult } from '@/lib/portfolio/types';
 
@@ -36,19 +36,27 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const ticker = body.ticker?.toUpperCase().trim();
   const side = body.side;
-  const quantity = Number(body.quantity);
+  const amountUsd = body.amountUsd != null ? Number(body.amountUsd) : null;
+  const quantityIn = body.quantity != null ? Number(body.quantity) : null;
 
   if (!ticker) {
-    return NextResponse.json({ error: 'Brak tickera' }, { status: 400 });
+    return NextResponse.json({ error: 'Missing ticker' }, { status: 400 });
   }
   if (side !== 'buy' && side !== 'sell') {
-    return NextResponse.json({ error: 'side musi być buy lub sell' }, { status: 400 });
+    return NextResponse.json({ error: 'side must be buy or sell' }, { status: 400 });
   }
-  if (!Number.isInteger(quantity) || quantity < 1) {
+  // Dokładnie jedno źródło wielkości zlecenia.
+  if ((amountUsd == null) === (quantityIn == null)) {
     return NextResponse.json(
-      { error: 'quantity musi być liczbą całkowitą ≥ 1' },
+      { error: 'Provide amountUsd or quantity' },
       { status: 400 },
     );
+  }
+  if (amountUsd != null && (!Number.isFinite(amountUsd) || amountUsd <= 0)) {
+    return NextResponse.json({ error: 'Amount must be positive' }, { status: 400 });
+  }
+  if (quantityIn != null && (!Number.isFinite(quantityIn) || quantityIn <= 0)) {
+    return NextResponse.json({ error: 'Quantity must be positive' }, { status: 400 });
   }
 
   try {
@@ -57,86 +65,34 @@ export async function POST(req: Request): Promise<NextResponse> {
     // Cena egzekucji — świeża z Finnhub.
     const price = await getExecutionPrice(supabase, ticker);
 
-    // Aktualna pozycja (jeśli jest).
-    const { data: posRow } = await supabase
-      .from('positions')
-      .select('id, quantity, avg_entry_price')
-      .eq('portfolio_id', portfolio.id)
-      .eq('ticker', ticker)
-      .maybeSingle();
+    // Ilość do egzekucji (ułamkowa).
+    let quantity =
+      amountUsd != null ? floorShares(amountUsd / price) : roundShares(quantityIn as number);
 
-    let realizedPnL: number | null = null;
-
-    if (side === 'buy') {
-      const cost = price * quantity;
-      if (cost > portfolio.cash) {
-        return NextResponse.json(
-          { error: 'Za mało środków na zakup' },
-          { status: 400 },
-        );
-      }
-
-      if (posRow) {
-        // Średnia ważona cena wejścia.
-        const oldQty = Number(posRow.quantity);
-        const oldAvg = Number(posRow.avg_entry_price);
-        const newQty = oldQty + quantity;
-        const newAvg = (oldAvg * oldQty + price * quantity) / newQty;
-        await supabase
-          .from('positions')
-          .update({ quantity: newQty, avg_entry_price: newAvg, updated_at: new Date().toISOString() })
-          .eq('id', posRow.id);
-      } else {
-        await supabase.from('positions').insert({
-          portfolio_id: portfolio.id,
-          ticker,
-          quantity,
-          avg_entry_price: price,
-        });
-      }
-
-      await supabase
-        .from('portfolios')
-        .update({ cash: portfolio.cash - cost })
-        .eq('id', portfolio.id);
-    } else {
-      // SELL
-      if (!posRow || Number(posRow.quantity) < quantity) {
-        return NextResponse.json(
-          { error: 'Za mało akcji do sprzedaży' },
-          { status: 400 },
-        );
-      }
-
-      const oldQty = Number(posRow.quantity);
-      const avg = Number(posRow.avg_entry_price);
-      realizedPnL = (price - avg) * quantity;
-      const newQty = oldQty - quantity;
-
-      if (newQty === 0) {
-        await supabase.from('positions').delete().eq('id', posRow.id);
-      } else {
-        // Częściowa sprzedaż — reszta zachowuje tę samą avg entry.
-        await supabase
-          .from('positions')
-          .update({ quantity: newQty, updated_at: new Date().toISOString() })
-          .eq('id', posRow.id);
-      }
-
-      await supabase
-        .from('portfolios')
-        .update({ cash: portfolio.cash + price * quantity })
-        .eq('id', portfolio.id);
+    // Sprzedaż „za X$" przycinamy do posiadanej ilości → czyste pełne wyjście.
+    if (side === 'sell' && amountUsd != null) {
+      const { data: posRow } = await supabase
+        .from('positions')
+        .select('quantity')
+        .eq('portfolio_id', portfolio.id)
+        .eq('ticker', ticker)
+        .maybeSingle();
+      const owned = posRow ? Number(posRow.quantity) : 0;
+      quantity = Math.min(quantity, owned);
     }
 
-    // Wpis do historii (niezmienny ledger).
-    await supabase.from('trades').insert({
-      portfolio_id: portfolio.id,
+    if (quantity <= 0) {
+      return NextResponse.json(
+        { error: side === 'buy' ? 'Amount too small to buy' : 'No shares to sell' },
+        { status: 400 },
+      );
+    }
+
+    const { realizedPnL } = await executeMarketOrder(supabase, portfolio, {
       ticker,
       side,
       quantity,
       price,
-      realized_pnl: realizedPnL,
     });
 
     // Świeży stan portfela po transakcji.
@@ -154,6 +110,9 @@ export async function POST(req: Request): Promise<NextResponse> {
     };
     return NextResponse.json(result);
   } catch (err) {
+    if (err instanceof OrderError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     console.error('[api/orders]', err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Internal error' },

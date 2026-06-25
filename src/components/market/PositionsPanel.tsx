@@ -9,6 +9,7 @@ import { usePortfolioStore } from '@/store/portfolioStore';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { cn } from '@/lib/utils';
 import { fmtUSD, fmtPct } from '@/lib/portfolio/format';
+import { fmtShares } from '@/lib/portfolio/shares';
 
 export default function PositionsPanel() {
   const portfolio = usePortfolioStore((s) => s.portfolio);
@@ -26,14 +27,14 @@ export default function PositionsPanel() {
     <div className="flex flex-col h-full overflow-hidden">
       <div className="px-3 py-2 border-b border-border-subtle shrink-0">
         <span className="font-mono text-[10px] text-zinc-600 uppercase tracking-wider">
-          Pozycje
+          Positions
         </span>
       </div>
       <div className="flex flex-col flex-1 overflow-y-auto">
       {positions.length === 0 ? (
         <div className="flex-1 flex items-center justify-center px-4">
           <p className="font-mono text-[11px] text-zinc-600 text-center">
-            {loading ? 'Ładowanie…' : 'Brak otwartych pozycji.\nKup instrument, by zacząć.'}
+            {loading ? 'Loading…' : 'No open positions.\nBuy an instrument to start.'}
           </p>
         </div>
       ) : (
@@ -58,7 +59,7 @@ export default function PositionsPanel() {
               </div>
               <div className="flex items-center justify-between mt-0.5">
                 <span className="font-mono text-[10px] text-zinc-500">
-                  {p.quantity} × {fmtUSD(p.avgEntryPrice)}
+                  {fmtShares(p.quantity)} × {fmtUSD(p.avgEntryPrice)}
                 </span>
                 <span className="font-mono text-[10px] text-zinc-400 tabular-nums">
                   {fmtUSD(p.currentPrice)}

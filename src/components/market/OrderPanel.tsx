@@ -2,15 +2,16 @@
 
 // ============================================================
 // Panel Kup/Sprzedaj — pod wykresem, dla aktualnie oglądanego tickera.
-// Egzekucja po świeżej cenie serwerowej; tu pokazujemy cenę z cache (quote)
-// tylko do podglądu kosztu.
+// Dwa sprzężone pola: kwota $ ⇄ ilość akcji (ułamkowa), przeliczane po cenie
+// z cache (podgląd). Egzekucja po świeżej cenie serwerowej. Wysyłamy to pole,
+// które user ostatnio edytował — kwota → amountUsd, ilość → quantity.
 // ============================================================
 import { useEffect, useState } from 'react';
-import { Minus, Plus } from 'lucide-react';
 import { useChartStore } from '@/store/chartStore';
 import { usePortfolioStore } from '@/store/portfolioStore';
 import { isMarketOpen } from '@/lib/market/hours';
 import { fmtUSD, fmtSignedUSD } from '@/lib/portfolio/format';
+import { roundShares, fmtShares } from '@/lib/portfolio/shares';
 import { cn } from '@/lib/utils';
 
 export default function OrderPanel() {
@@ -22,51 +23,93 @@ export default function OrderPanel() {
   const placeOrder = usePortfolioStore((s) => s.placeOrder);
   const fetchPortfolio = usePortfolioStore((s) => s.fetchPortfolio);
 
-  const [qty, setQty] = useState(1);
+  const [amount, setAmount] = useState('100');
+  const [shares, setShares] = useState('');
+  const [lastEdited, setLastEdited] = useState<'amount' | 'shares'>('amount');
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
     if (!portfolio) void fetchPortfolio();
   }, [portfolio, fetchPortfolio]);
 
-  // Reset komunikatu i ilości przy zmianie instrumentu
+  // Reset przy zmianie instrumentu.
   useEffect(() => {
     setMsg(null);
-    setQty(1);
+    setAmount('100');
+    setLastEdited('amount');
   }, [ticker]);
+
+  const price = quote?.price;
+
+  // Synchronizacja pól: przelicz pole zależne ze źródła (ostatnio edytowanego)
+  // — także gdy cena tyknie. Setery są idempotentne w punkcie stałym → bez pętli.
+  useEffect(() => {
+    if (price == null) return;
+    if (lastEdited === 'amount') {
+      const a = Number(amount);
+      setShares(Number.isFinite(a) && a > 0 ? String(roundShares(a / price)) : '');
+    } else {
+      const s = Number(shares);
+      setAmount(Number.isFinite(s) && s > 0 ? (s * price).toFixed(2) : '');
+    }
+  }, [price, amount, shares, lastEdited]);
 
   if (!ticker) return null;
 
   const marketOpen = isMarketOpen();
-  const price = quote?.price;
   const owned = portfolio?.positions.find((p) => p.ticker === ticker)?.quantity ?? 0;
   const cash = portfolio?.cash ?? 0;
-  const cost = price != null ? price * qty : 0;
+  const amountNum = Number(amount);
+  const sharesNum = Number(shares);
 
-  const canBuy = price != null && !ordering && cost <= cash;
-  const canSell = price != null && !ordering && owned >= qty;
+  const canBuy =
+    price != null && !ordering && amountNum > 0 && amountNum <= cash;
+  const canSell =
+    price != null && !ordering && owned > 0 && sharesNum > 0 && sharesNum <= owned + 1e-9;
+
+  const onAmount = (v: string) => {
+    setAmount(v);
+    setLastEdited('amount');
+  };
+  const onShares = (v: string) => {
+    setShares(v);
+    setLastEdited('shares');
+  };
+  // Wypełnij ilością całej pozycji (czyste pełne wyjście, bez pyłu).
+  const fillMax = () => {
+    if (owned <= 0) return;
+    setShares(String(owned));
+    setLastEdited('shares');
+  };
 
   const submit = async (side: 'buy' | 'sell') => {
     setMsg(null);
-    const res = await placeOrder({ ticker, side, quantity: qty });
+    const req =
+      lastEdited === 'amount'
+        ? { ticker, side, amountUsd: amountNum }
+        : { ticker, side, quantity: sharesNum };
+    const res = await placeOrder(req);
     if (res.ok && res.result) {
       const r = res.result;
       setMsg({
         type: 'ok',
         text:
-          `${side === 'buy' ? 'Kupiono' : 'Sprzedano'} ${r.quantity}× ${r.ticker} @ ${fmtUSD(r.executionPrice)}` +
+          `${side === 'buy' ? 'Bought' : 'Sold'} ${fmtShares(r.quantity)}× ${r.ticker} @ ${fmtUSD(r.executionPrice)}` +
           (r.realizedPnL != null ? `  ·  P/L ${fmtSignedUSD(r.realizedPnL)}` : ''),
       });
     } else {
-      setMsg({ type: 'err', text: res.error ?? 'Błąd zlecenia' });
+      setMsg({ type: 'err', text: res.error ?? 'Order error' });
     }
   };
+
+  const inputCls =
+    'w-24 bg-transparent border border-border-subtle rounded px-2 py-1 font-mono text-[11px] text-gray-100 tabular-nums outline-none focus:border-accent/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
 
   return (
     <div className="border-t border-border-subtle shrink-0 px-4 py-2">
       {!marketOpen && (
         <div className="mb-2 font-mono text-[9px] text-amber-500/80 uppercase tracking-wider">
-          ⚠ Rynek zamknięty — cena może nie odzwierciedlać wartości rzeczywistej
+          ⚠ Market closed — price may not reflect real value
         </div>
       )}
 
@@ -79,35 +122,44 @@ export default function OrderPanel() {
           </span>
         </div>
 
-        {/* Stepper ilości */}
-        <div className="flex items-center border border-border-subtle rounded overflow-hidden">
-          <button
-            onClick={() => setQty((q) => Math.max(1, q - 1))}
-            className="px-1.5 py-1 text-zinc-500 hover:text-accent transition-colors"
-            aria-label="Zmniejsz ilość"
-          >
-            <Minus size={12} />
-          </button>
+        {/* Kwota $ */}
+        <label className="flex items-center gap-1">
+          <span className="font-mono text-[10px] text-zinc-500">$</span>
           <input
             type="number"
-            min={1}
-            value={qty}
-            onChange={(e) => setQty(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
-            className="w-12 bg-transparent text-center font-mono text-[11px] text-gray-100 outline-none tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            min={0}
+            step="any"
+            value={amount}
+            onChange={(e) => onAmount(e.target.value)}
+            placeholder="Amount"
+            aria-label="Amount in USD"
+            className={inputCls}
           />
-          <button
-            onClick={() => setQty((q) => q + 1)}
-            className="px-1.5 py-1 text-zinc-500 hover:text-accent transition-colors"
-            aria-label="Zwiększ ilość"
-          >
-            <Plus size={12} />
-          </button>
-        </div>
+        </label>
 
-        {/* Koszt */}
-        <span className="font-mono text-[10px] text-zinc-500">
-          Koszt: <span className="text-zinc-300 tabular-nums">{fmtUSD(cost)}</span>
-        </span>
+        {/* Ilość akcji (ułamkowa) */}
+        <label className="flex items-center gap-1">
+          <input
+            type="number"
+            min={0}
+            step="any"
+            value={shares}
+            onChange={(e) => onShares(e.target.value)}
+            placeholder="Qty"
+            aria-label="Shares"
+            className={inputCls}
+          />
+          <span className="font-mono text-[9px] text-zinc-600">shares</span>
+          {owned > 0 && (
+            <button
+              onClick={fillMax}
+              className="font-mono text-[9px] text-zinc-500 hover:text-accent transition-colors"
+              type="button"
+            >
+              max
+            </button>
+          )}
+        </label>
 
         {/* Akcje */}
         <div className="flex items-center gap-2 ml-auto">
@@ -121,7 +173,7 @@ export default function OrderPanel() {
                 : 'bg-zinc-900 text-zinc-700 cursor-not-allowed',
             )}
           >
-            Kup
+            Buy
           </button>
           <button
             onClick={() => void submit('sell')}
@@ -133,7 +185,7 @@ export default function OrderPanel() {
                 : 'bg-zinc-900 text-zinc-700 cursor-not-allowed',
             )}
           >
-            Sprzedaj
+            Sell
           </button>
         </div>
       </div>
@@ -141,7 +193,7 @@ export default function OrderPanel() {
       {/* Posiadane + cash + komunikat */}
       <div className="flex items-center justify-between mt-1.5">
         <span className="font-mono text-[9px] text-zinc-600">
-          Posiadasz: {owned} · Cash: {fmtUSD(cash)}
+          Holdings: {fmtShares(owned)} · Cash: {fmtUSD(cash)}
         </span>
         {msg && (
           <span
