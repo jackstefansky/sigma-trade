@@ -15,7 +15,7 @@ const NewsFeed = dynamic(() => import('@/components/agents/NewsFeed'), {
   ssr: false,
   loading: () => (
     <div className="flex-1 flex items-center justify-center">
-      <span className="font-mono text-xs text-zinc-700">Loading…</span>
+      <span className="font-mono text-xs text-zinc-500">Loading…</span>
     </div>
   ),
 });
@@ -25,7 +25,7 @@ const CoachPanel = dynamic(() => import('@/components/agents/CoachPanel'), {
   ssr: false,
   loading: () => (
     <div className="flex-1 flex items-center justify-center">
-      <span className="font-mono text-xs text-zinc-700">Loading…</span>
+      <span className="font-mono text-xs text-zinc-500">Loading…</span>
     </div>
   ),
 });
@@ -151,10 +151,10 @@ export default function DashboardClient({ agents, intervalSeconds, autoFetch, us
           <span className="font-mono text-sm font-semibold text-gray-100 tracking-wide">
             Sigma Trade
           </span>
-          <span className="font-mono text-xs text-gray-500">v0.2.0</span>
+          <span className="font-mono text-xs text-gray-400">v0.2.0</span>
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
-            <span className="hidden md:block font-mono text-xs text-gray-500 uppercase tracking-wider">
+            <span className="hidden md:block font-mono text-xs text-gray-400 uppercase tracking-wider">
               Paper Trading
             </span>
           </div>
@@ -165,6 +165,10 @@ export default function DashboardClient({ agents, intervalSeconds, autoFetch, us
         </div>
       </header>
 
+      {/* Główny obszar aplikacji — landmark <main> dla czytników ekranu
+          i nawigacji klawiaturą (skip-to-content). Obejmuje oba warianty
+          layoutu; w danym breakpoincie widoczny jest tylko jeden. */}
+      <main className="flex flex-1 flex-col overflow-hidden min-h-0">
       {/* ── DESKTOP layout (md+) ─────────────────────────────────── */}
       <div
         ref={desktopRef}
@@ -263,6 +267,7 @@ export default function DashboardClient({ agents, intervalSeconds, autoFetch, us
           </div>
         </div>
       </div>
+      </main>
 
       {/* Jednorazowe powitanie Coacha (tylko desktop) */}
       {showCoachIntro && (
